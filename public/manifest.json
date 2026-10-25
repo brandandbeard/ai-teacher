@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "Gemini Live Voice & Multimodal",
+  "short_name": "GeminiLive",
+  "description": "Real-time conversational AI powered by Google Gemini Live: bidirectional voice, vision, and tools.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
