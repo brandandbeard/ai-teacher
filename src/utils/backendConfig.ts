@@ -1,7 +1,10 @@
 /**
  * Unified backend host configuration & sanitization
+ * Default production backend is ai-teacher-1-rg3n.onrender.com
  * Handles Render, Vercel, Railway, Cloud Run, Localhost, and custom domains.
  */
+
+export const DEFAULT_PRODUCTION_RENDER_BACKEND = 'ai-teacher-1-rg3n.onrender.com';
 
 export function cleanBackendHost(input: string): string {
   if (!input) return '';
@@ -14,9 +17,9 @@ export function cleanBackendHost(input: string): string {
 }
 
 export function getSavedBackendHost(): string {
-  if (typeof window === 'undefined') return '';
+  if (typeof window === 'undefined') return DEFAULT_PRODUCTION_RENDER_BACKEND;
 
-  // 1. User configured in localStorage
+  // 1. User configured in localStorage (if specifically overridden)
   try {
     const stored = localStorage.getItem('live_backend_host');
     if (stored && stored.trim()) {
@@ -42,7 +45,8 @@ export function getSavedBackendHost(): string {
     return window.location.host;
   }
 
-  return '';
+  // 4. Default production backend for Vercel, mobile visitors, friends & family
+  return DEFAULT_PRODUCTION_RENDER_BACKEND;
 }
 
 export function saveBackendHost(host: string): string {

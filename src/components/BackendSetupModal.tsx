@@ -74,7 +74,7 @@ export const BackendSetupModal: React.FC<BackendSetupModalProps> = ({
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="যেমন: https://ai-teacher-xxxx.onrender.com"
+                placeholder="যেমন: ai-teacher-1-rg3n.onrender.com"
                 className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-xs text-cyan-300 font-mono placeholder-slate-500 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 focus:outline-none"
                 autoFocus
               />

@@ -173,17 +173,6 @@ if __name__ == "__main__":
         {/* Navigation Tabs */}
         <div className="flex border-b border-slate-800 bg-slate-950/30 px-6 overflow-x-auto text-sm">
           <button
-            onClick={() => setActiveTab('github')}
-            className={`flex items-center gap-2 py-3 px-3 font-medium border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'github'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <FolderGit2 className="h-4 w-4" />
-            GitHub Repository & Export
-          </button>
-          <button
             onClick={() => setActiveTab('vercel')}
             className={`flex items-center gap-2 py-3 px-3 font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === 'vercel'
@@ -253,109 +242,6 @@ if __name__ == "__main__":
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 text-slate-300">
-          {activeTab === 'github' && (
-            <div className="space-y-6">
-              <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/20 p-5">
-                <h3 className="text-base font-semibold text-indigo-300 flex items-center gap-2">
-                  <GitBranch className="h-5 w-5 text-indigo-400" />
-                  How to Put This Project on GitHub
-                </h3>
-                <p className="mt-2 text-sm text-slate-300 leading-relaxed">
-                  Your project is structured as a standard full-stack repository with a production <code className="text-cyan-300">README.md</code>, <code className="text-cyan-300">Dockerfile</code>, and <code className="text-cyan-300">package.json</code>. You can export it to GitHub in two ways:
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                {/* Method 1: In AI Studio */}
-                <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
-                  <div className="font-bold text-white flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-[11px] text-white">1</span>
-                    <span>Method 1: Direct Export from AI Studio (Easiest)</span>
-                  </div>
-                  <ol className="list-decimal list-inside space-y-1.5 text-slate-300">
-                    <li>Look at the top-right corner or file tree panel in <strong>Google AI Studio</strong>.</li>
-                    <li>Click the <strong>Export</strong> or <strong>GitHub</strong> button.</li>
-                    <li>Authenticate with your GitHub account.</li>
-                    <li>Choose a repository name (e.g. <code className="text-cyan-300">gemini-live-assistant</code>) and click <strong>Create / Export</strong>.</li>
-                    <li>Your full codebase, commits, and files are instantly published to your GitHub!</li>
-                  </ol>
-                </div>
-
-                {/* Method 2: Command Line */}
-                <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
-                  <div className="font-bold text-white flex items-center gap-2">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-[11px] text-white">2</span>
-                    <span>Method 2: Push via Git Terminal</span>
-                  </div>
-                  <p className="text-slate-400">
-                    If you downloaded the code or cloned it, use these standard terminal commands to push to any new GitHub repo:
-                  </p>
-                  <button
-                    onClick={() => copyToClipboard('git', githubPushCommands)}
-                    className="mt-1 flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-[11px] transition-colors"
-                  >
-                    {copiedKey === 'git' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-                    {copiedKey === 'git' ? 'Copied Commands' : 'Copy Git Push Commands'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Git Commands Block */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Git Terminal Commands
-                  </span>
-                  <button
-                    onClick={() => copyToClipboard('git', githubPushCommands)}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 transition-colors"
-                  >
-                    {copiedKey === 'git' ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-                    {copiedKey === 'git' ? 'Copied' : 'Copy'}
-                  </button>
-                </div>
-                <pre className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed">
-                  <code>{githubPushCommands}</code>
-                </pre>
-              </div>
-
-              {/* Blank Page Troubleshooting Card */}
-              <div className="rounded-xl border border-red-500/40 bg-red-950/20 p-4 space-y-2 text-xs">
-                <div className="font-bold text-red-300 flex items-center gap-2">
-                  <span>🚨 Seeing a Blank Page on GitHub Pages? Here is the exact fix:</span>
-                </div>
-                <p className="text-slate-300 leading-relaxed">
-                  If GitHub Pages shows a blank white page, it is because GitHub Pages is trying to serve raw, uncompiled <code className="text-red-200">src/main.tsx</code> directly. Browsers cannot run TypeScript source files without compiling them to JavaScript first.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
-                    <span className="font-semibold text-emerald-400">Method 1 (Fastest CLI):</span>
-                    <p className="text-slate-400 text-[11px]">Run this command in terminal:</p>
-                    <code className="block bg-slate-950 p-1.5 rounded text-emerald-300 font-mono text-[11px]">npm run deploy</code>
-                    <p className="text-[10px] text-slate-500">This automatically builds <code className="text-slate-400">dist</code> and pushes to the <code className="text-slate-400">gh-pages</code> branch!</p>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1">
-                    <span className="font-semibold text-cyan-400">Method 2 (In GitHub Settings):</span>
-                    <p className="text-slate-400 text-[11px]">
-                      Go to GitHub repository &gt; <strong>Settings</strong> &gt; <strong>Pages</strong> &gt; under <strong>Source</strong>, select <strong>GitHub Actions</strong> instead of "Deploy from a branch".
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* GitHub Secrets note */}
-              <div className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-4 space-y-1 text-xs">
-                <div className="font-semibold text-amber-300 flex items-center gap-1.5">
-                  <ShieldCheck className="h-4 w-4" />
-                  Storing your API Key on GitHub
-                </div>
-                <p className="text-slate-300 leading-relaxed">
-                  Never commit your actual <code className="text-amber-200">.env</code> file or secret keys directly to a public GitHub repository. (The <code className="text-slate-200">.gitignore</code> file automatically excludes <code className="text-slate-200">.env</code>). When deploying from GitHub (e.g., to Vercel, Render, or Cloud Run), store your key in the provider's <strong>Environment Variables</strong> or in GitHub <strong>Repository Secrets</strong> (<code className="text-slate-200">Settings &gt; Secrets and variables &gt; Actions</code>).
-                </p>
-              </div>
-            </div>
-          )}
-
           {activeTab === 'vercel' && (
             <div className="space-y-6">
               <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-5">

@@ -25,16 +25,15 @@ import {
   Eye,
   Gauge,
   Sliders,
-  Server,
+  BookOpen,
+  GraduationCap,
 } from 'lucide-react';
 import { LiveAudioPlayer, LiveAudioRecorder } from './utils/audio.ts';
 import { AudioOrb } from './components/AudioOrb.tsx';
-import { GuideModal } from './components/GuideModal.tsx';
 import { VoiceSelector, VOICES } from './components/VoiceSelector.tsx';
 import { TranscriptView, TranscriptItem } from './components/TranscriptView.tsx';
 import { RunAnywhereModal } from './components/RunAnywhereModal.tsx';
-import { BackendSetupModal } from './components/BackendSetupModal.tsx';
-import { getSavedBackendHost, cleanBackendHost, saveBackendHost, getWsUrl } from './utils/backendConfig.ts';
+import { getSavedBackendHost, cleanBackendHost, getWsUrl } from './utils/backendConfig.ts';
 import {
   SHREYA_MAAM_PROMPT,
   BHATTACHARYA_SIR_PROMPT,
@@ -43,6 +42,9 @@ import {
   SUDARSHAN_GURJAR_SIR_PROMPT,
   DR_SENGUPTA_PROMPT,
   ADHIKARI_SIR_PROMPT,
+  WBBSE_HISTORY_PROMPT,
+  WBBSE_SCIENCE_PROMPT,
+  WBBSE_GEOGRAPHY_PROMPT,
 } from './data/teacherPersonas.ts';
 import { Globe } from 'lucide-react';
 
@@ -54,8 +56,7 @@ export default function App() {
   const [model, setModel] = useState<'gemini-3.8-live' | 'gemini-3.8-live-extended-thinking'>('gemini-3.8-live');
   const [voice, setVoice] = useState<string>('Kore');
   const [systemInstruction, setSystemInstruction] = useState<string>(SHREYA_MAAM_PROMPT);
-  const [backendHost, setBackendHost] = useState<string>(() => getSavedBackendHost());
-  const [showBackendSetup, setShowBackendSetup] = useState(false);
+  const [backendHost] = useState<string>(() => getSavedBackendHost());
 
   // Audio & Video State
   const [isMicMuted, setIsMicMuted] = useState(false);
@@ -74,7 +75,6 @@ export default function App() {
   const [callDuration, setCallDuration] = useState(0);
   const [chunksReceived, setChunksReceived] = useState(0);
   const [statusMessage, setStatusMessage] = useState('Ready to connect');
-  const [showGuide, setShowGuide] = useState(false);
   const [showRunAnywhere, setShowRunAnywhere] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showMobileTranscript, setShowMobileTranscript] = useState(false);
@@ -202,9 +202,8 @@ export default function App() {
 
       if (!wsHost) {
         setCallStatus('idle');
-        setStatusMessage('Render Backend লিঙ্ক প্রয়োজন');
-        setShowBackendSetup(true);
-        setErrorMessage('Vercel-এ লাইভ ভয়েস কথা বলার জন্য আপনার Render ব্যাকএন্ড লিঙ্কটি দিন।');
+        setStatusMessage('Backend connecting...');
+        setErrorMessage('লাইভ ভয়েস ব্যাকএন্ডের সাথে সংযোগ স্থাপন করা যাচ্ছে না। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।');
         return;
       }
 
@@ -212,7 +211,7 @@ export default function App() {
       const protocol = isLocal ? 'ws:' : 'wss:';
       const wsUrl = `${protocol}//${wsHost}/live-ws`;
 
-      setStatusMessage(`Connecting to ${wsHost}...`);
+      setStatusMessage('Connecting...');
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -354,14 +353,7 @@ export default function App() {
 
       ws.onerror = (err) => {
         console.error('WebSocket error:', err);
-        const host = typeof window !== 'undefined' ? window.location.hostname : '';
-        if (host.includes('vercel.app') || host.includes('github.io')) {
-          setErrorMessage(
-            'ব্যাকএন্ড কানেক্ট করা যায়নি। Render সার্ভিসটি Active আছে কিনা চেক করুন অথবা Configure Backend-এ গিয়ে আপনার Render লিঙ্কটি দিন।'
-          );
-        } else {
-          setErrorMessage('Connection issue detected. Please check network connectivity and microphone access.');
-        }
+        setErrorMessage('Connection issue detected. Please check network connectivity and microphone access.');
       };
 
       ws.onclose = () => {
@@ -626,48 +618,63 @@ export default function App() {
       {/* Top Navigation Bar */}
       <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-slate-800/80 px-3 sm:px-6 bg-slate-950/70 backdrop-blur-md z-30">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-600 to-purple-600 text-white shadow-lg shadow-cyan-500/20">
-            <Radio className="h-4 w-4 sm:h-5 sm:w-5 animate-pulse" />
-          </div>
+          <img
+            src="https://i.ibb.co/7qJGpT1/icon-192.png"
+            alt="Mega Quiz Voice AI"
+            className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl object-cover shadow-lg shadow-cyan-500/20 shrink-0"
+          />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">Live Voice AI</h1>
-              <span className="rounded-full bg-cyan-500/10 px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold text-cyan-400 border border-cyan-500/20 whitespace-nowrap">
-                By Arif Hussain
-              </span>
+              <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
+                Mega Quiz Voice AI -By Arif Hussain
+              </h1>
             </div>
             <p className="text-[10px] sm:text-[11px] text-slate-400 truncate hidden xs:block">Real-time Conversational Voice & Vision</p>
           </div>
         </div>
 
-        {/* Center Status Pill */}
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-800 bg-slate-900/60 text-xs">
-          <span
-            className={`h-2.5 w-2.5 rounded-full ${
-              callStatus === 'active' || callStatus === 'speaking' || callStatus === 'listening'
-                ? 'bg-emerald-400 animate-ping'
-                : callStatus === 'connecting'
-                ? 'bg-amber-400 animate-pulse'
-                : 'bg-slate-500'
-            }`}
-          />
-          <span className="font-medium text-slate-300">
-            {callStatus === 'idle' && 'Disconnected'}
-            {callStatus === 'connecting' && 'Connecting...'}
-            {callStatus === 'active' && 'Live In-Call'}
-            {callStatus === 'speaking' && 'AI Speaking'}
-            {callStatus === 'listening' && 'Listening to You'}
-            {callStatus === 'interrupted' && 'Interrupted'}
-          </span>
-          {callStatus !== 'idle' && (
-            <span className="ml-2 font-mono text-[11px] text-cyan-400 border-l border-slate-700 pl-2">
-              {formatTime(callDuration)}
+        {/* Center Status: Backend Connected + In-Call Status */}
+        <div className="hidden md:flex items-center gap-2.5">
+          {/* Simple Backend Connected Indicator (No links or domains) */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-emerald-500/30 bg-emerald-950/40 text-xs text-emerald-300 shadow-sm">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-semibold">Backend Connected</span>
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-800 bg-slate-900/60 text-xs">
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                callStatus === 'active' || callStatus === 'speaking' || callStatus === 'listening'
+                  ? 'bg-emerald-400 animate-ping'
+                  : callStatus === 'connecting'
+                  ? 'bg-amber-400 animate-pulse'
+                  : 'bg-slate-500'
+              }`}
+            />
+            <span className="font-medium text-slate-300">
+              {callStatus === 'idle' && 'Disconnected'}
+              {callStatus === 'connecting' && 'Connecting...'}
+              {callStatus === 'active' && 'Live In-Call'}
+              {callStatus === 'speaking' && 'AI Speaking'}
+              {callStatus === 'listening' && 'Listening to You'}
+              {callStatus === 'interrupted' && 'Interrupted'}
             </span>
-          )}
+            {callStatus !== 'idle' && (
+              <span className="ml-2 font-mono text-[11px] text-cyan-400 border-l border-slate-700 pl-2">
+                {formatTime(callDuration)}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Mobile Backend Status indicator */}
+          <div className="flex md:hidden items-center gap-1 px-2 py-1 rounded-full border border-emerald-500/30 bg-emerald-950/40 text-[10px] text-emerald-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-medium">Backend Connected</span>
+          </div>
+
           {/* Mobile Transcript Toggle Button */}
           <button
             onClick={() => setShowMobileTranscript(true)}
@@ -678,16 +685,6 @@ export default function App() {
             <span className="text-[10px]">Chat</span>
           </button>
 
-          {/* Backend Server Configuration Button */}
-          <button
-            onClick={() => setShowBackendSetup(true)}
-            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-950/30 hover:bg-cyan-900/40 text-cyan-300 text-xs font-semibold transition-all shadow-sm shadow-cyan-500/10"
-            title="Backend Server Configuration"
-          >
-            <Server className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-cyan-400" />
-            <span className="hidden sm:inline">Backend</span>
-          </button>
-
           {/* Run Anywhere / Standalone Button */}
           <button
             onClick={() => setShowRunAnywhere(true)}
@@ -696,16 +693,6 @@ export default function App() {
           >
             <Globe className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-400" />
             <span className="hidden sm:inline">Use Anywhere</span>
-          </button>
-
-          {/* Guide Modal Button */}
-          <button
-            onClick={() => setShowGuide(true)}
-            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/30 hover:bg-cyan-900/40 text-cyan-300 text-xs font-semibold transition-all shadow-sm"
-            title="How to use Live Voice"
-          >
-            <HelpCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-            <span className="hidden sm:inline">Guide</span>
           </button>
 
           {/* Settings Button */}
@@ -721,36 +708,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Deployment & Backend Connection Banner */}
-      {typeof window !== 'undefined' &&
-        (window.location.hostname.endsWith('vercel.app') || window.location.hostname.endsWith('github.io')) && (
-          <div className="bg-slate-900/90 border-b border-slate-800 px-4 py-2 text-[11px] flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  backendHost ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-ping'
-                }`}
-              />
-              <span className={backendHost ? 'text-emerald-300' : 'text-amber-300'}>
-                {backendHost ? (
-                  <>
-                    Backend Connected: <span className="font-mono text-cyan-300">{backendHost}</span>
-                  </>
-                ) : (
-                  'লাইভ ভয়েস কথা বলার জন্য Render ব্যাকএন্ড লিঙ্ক কানেক্ট করুন।'
-                )}
-              </span>
-            </div>
-            <button
-              onClick={() => setShowBackendSetup(true)}
-              className="text-xs px-2.5 py-0.5 rounded bg-cyan-600/80 hover:bg-cyan-500 text-white font-medium ml-2 transition-colors"
-            >
-              {backendHost ? 'Change Server' : 'Connect Render'}
-            </button>
-          </div>
-        )}
-
-      {/* Error Banner with 1-Click Fix Button */}
+      {/* Error Banner */}
       {errorMessage && (
         <div className="flex items-center justify-between bg-red-950/90 border-b border-red-800 px-4 py-2.5 text-xs text-red-200">
           <div className="flex items-center gap-2 min-w-0">
@@ -758,12 +716,6 @@ export default function App() {
             <span className="truncate">{errorMessage}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-4">
-            <button
-              onClick={() => setShowBackendSetup(true)}
-              className="rounded bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-2.5 py-1 text-xs shadow-sm transition-colors"
-            >
-              Configure Backend
-            </button>
             <button
               onClick={() => setErrorMessage(null)}
               className="text-red-300 hover:text-white text-xs underline"
@@ -783,7 +735,9 @@ export default function App() {
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800">
                 <Cpu className="h-3.5 w-3.5 text-indigo-400" />
-                <span className="font-mono text-slate-200">{model}</span>
+                <span className="font-mono text-slate-200">
+                  {model === 'gemini-3.8-live' ? 'Model 1' : 'Model 2'}
+                </span>
               </span>
               <span className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800">
                 <Volume2 className="h-3.5 w-3.5 text-cyan-400" />
@@ -857,79 +811,141 @@ export default function App() {
               </p>
             </div>
 
-            {/* Quick Starter Conversation Prompts */}
+            {/* Quick Starter Conversation Prompts - Strictly Separated Sections */}
             {callStatus === 'idle' && (
-              <div className="mt-6 flex flex-wrap items-center justify-center gap-2 max-w-2xl">
-                <button
-                  onClick={() => {
-                    setVoice('Kore');
-                    setSystemInstruction(SHREYA_MAAM_PROMPT);
-                    startCall();
-                  }}
-                  className="px-3 py-1.5 rounded-full border border-amber-500/40 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 text-xs font-medium transition-colors shadow-sm"
-                >
-                  👩‍🏫 Shreya Ma'am (English)
-                </button>
-                <button
-                  onClick={() => {
-                    setVoice('Charon');
-                    setSystemInstruction(BHATTACHARYA_SIR_PROMPT);
-                    startCall();
-                  }}
-                  className="px-3 py-1.5 rounded-full border border-amber-500/40 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 text-xs font-medium transition-colors shadow-sm"
-                >
-                  📜 Bhattacharya Sir (History)
-                </button>
-                <button
-                  onClick={() => {
-                    setVoice('Charon');
-                    setSystemInstruction(SARMAD_MEHRAJ_SIR_PROMPT);
-                    startCall();
-                  }}
-                  className="px-3 py-1.5 rounded-full border border-cyan-500/40 bg-cyan-950/40 hover:bg-cyan-900/50 text-cyan-300 text-xs font-medium transition-colors shadow-sm"
-                >
-                  ⚖️ Sarmad Mehraj Sir (Polity)
-                </button>
-                <button
-                  onClick={() => {
-                    setVoice('Puck');
-                    setSystemInstruction(MRUNAL_PATEL_SIR_PROMPT);
-                    startCall();
-                  }}
-                  className="px-3 py-1.5 rounded-full border border-emerald-500/40 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 text-xs font-medium transition-colors shadow-sm"
-                >
-                  📈 Mrunal Sir (Economy)
-                </button>
-                <button
-                  onClick={() => {
-                    setVoice('Fenrir');
-                    setSystemInstruction(SUDARSHAN_GURJAR_SIR_PROMPT);
-                    startCall();
-                  }}
-                  className="px-3 py-1.5 rounded-full border border-blue-500/40 bg-blue-950/40 hover:bg-blue-900/50 text-blue-300 text-xs font-medium transition-colors shadow-sm"
-                >
-                  🌍 Sudarshan Sir (Geography)
-                </button>
-                <button
-                  onClick={() => {
-                    setVoice('Fenrir');
-                    setSystemInstruction(DR_SENGUPTA_PROMPT);
-                    startCall();
-                  }}
-                  className="px-3 py-1.5 rounded-full border border-teal-500/40 bg-teal-950/40 hover:bg-teal-900/50 text-teal-300 text-xs font-medium transition-colors shadow-sm"
-                >
-                  🔬 Dr. Sengupta (Sci-Tech)
-                </button>
-                <button
-                  onClick={() => {
-                    setVoice('Charon');
-                    setSystemInstruction(ADHIKARI_SIR_PROMPT);
-                    startCall();
-                  }}
-                  className="px-3 py-1.5 rounded-full border border-purple-500/40 bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 text-xs font-medium transition-colors shadow-sm"
-                >
-                  🏛️ Adhikari Sir (Static GK)
-                </button>
+              <div className="mt-5 w-full max-w-3xl space-y-3">
+                {/* 1. WBBSE (Class V - X) */}
+                <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-r from-emerald-950/40 via-slate-900/60 to-emerald-950/40 p-3 shadow-lg shadow-emerald-950/20">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <span className="text-[11px] sm:text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <BookOpen className="h-3.5 w-3.5" />
+                      WBBSE (Class V - X)
+                    </span>
+                    <span className="text-[9px] sm:text-[10px] text-emerald-300 bg-emerald-950/90 border border-emerald-500/40 px-2 py-0.5 rounded-full font-medium shadow-sm">
+                      বাংলা পাঠ্যবই
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      onClick={() => {
+                        setVoice('Charon');
+                        setSystemInstruction(WBBSE_HISTORY_PROMPT);
+                        startCall();
+                      }}
+                      className="px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10 hover:scale-[1.02] flex items-center justify-center gap-1.5 text-center"
+                    >
+                      <span>📖</span>
+                      <span>ইতিহাস (Class V - X)</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoice('Kore');
+                        setSystemInstruction(WBBSE_SCIENCE_PROMPT);
+                        startCall();
+                      }}
+                      className="px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10 hover:scale-[1.02] flex items-center justify-center gap-1.5 text-center"
+                    >
+                      <span>🔬</span>
+                      <span>বিজ্ঞান (ভৌত+জীবন · Class V - X)</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoice('Charon');
+                        setSystemInstruction(WBBSE_GEOGRAPHY_PROMPT);
+                        startCall();
+                      }}
+                      className="px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10 hover:scale-[1.02] flex items-center justify-center gap-1.5 text-center"
+                    >
+                      <span>🗺️</span>
+                      <span>ভূগোল (Class V - X)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Competitive & Spoken */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <span className="text-[11px] sm:text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                      <GraduationCap className="h-3.5 w-3.5" />
+                      Competitive & Spoken
+                    </span>
+                    <span className="text-[9px] text-amber-400/80 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
+                      বিষয়সমূহ
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        setVoice('Kore');
+                        setSystemInstruction(SHREYA_MAAM_PROMPT);
+                        startCall();
+                      }}
+                      className="px-2.5 py-1 rounded-lg border border-amber-500/30 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 text-[11px] font-medium transition-colors"
+                    >
+                      🗣️ Spoken English
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoice('Charon');
+                        setSystemInstruction(BHATTACHARYA_SIR_PROMPT);
+                        startCall();
+                      }}
+                      className="px-2.5 py-1 rounded-lg border border-amber-500/30 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 text-[11px] font-medium transition-colors"
+                    >
+                      📜 Indian History
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoice('Charon');
+                        setSystemInstruction(SARMAD_MEHRAJ_SIR_PROMPT);
+                        startCall();
+                      }}
+                      className="px-2.5 py-1 rounded-lg border border-cyan-500/30 bg-cyan-950/30 hover:bg-cyan-900/40 text-cyan-300 text-[11px] font-medium transition-colors"
+                    >
+                      ⚖️ Polity & Constitution
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoice('Puck');
+                        setSystemInstruction(MRUNAL_PATEL_SIR_PROMPT);
+                        startCall();
+                      }}
+                      className="px-2.5 py-1 rounded-lg border border-emerald-500/30 bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-300 text-[11px] font-medium transition-colors"
+                    >
+                      📈 Indian Economy
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoice('Fenrir');
+                        setSystemInstruction(SUDARSHAN_GURJAR_SIR_PROMPT);
+                        startCall();
+                      }}
+                      className="px-2.5 py-1 rounded-lg border border-blue-500/30 bg-blue-950/30 hover:bg-blue-900/40 text-blue-300 text-[11px] font-medium transition-colors"
+                    >
+                      🌍 Geography & Astronomy
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoice('Fenrir');
+                        setSystemInstruction(DR_SENGUPTA_PROMPT);
+                        startCall();
+                      }}
+                      className="px-2.5 py-1 rounded-lg border border-teal-500/30 bg-teal-950/30 hover:bg-teal-900/40 text-teal-300 text-[11px] font-medium transition-colors"
+                    >
+                      🔬 Science & Technology
+                    </button>
+                    <button
+                      onClick={() => {
+                        setVoice('Charon');
+                        setSystemInstruction(ADHIKARI_SIR_PROMPT);
+                        startCall();
+                      }}
+                      className="px-2.5 py-1 rounded-lg border border-purple-500/30 bg-purple-950/30 hover:bg-purple-900/40 text-purple-300 text-[11px] font-medium transition-colors"
+                    >
+                      🏛️ Static GK
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -1098,18 +1114,18 @@ export default function App() {
                     disabled={callStatus !== 'idle'}
                     className={`p-3 rounded-xl border text-left transition-all ${
                       model === 'gemini-3.8-live'
-                        ? 'border-cyan-500 bg-cyan-950/30'
+                        ? 'border-cyan-500 bg-cyan-950/30 ring-1 ring-cyan-500/50'
                         : 'border-slate-800 bg-slate-900/50 hover:bg-slate-800'
                     } ${callStatus !== 'idle' ? 'opacity-60 cursor-not-allowed' : ''}`}
                   >
                     <div className="text-xs font-bold text-white flex items-center justify-between">
-                      <span>gemini-3.8-live</span>
+                      <span>Model 1</span>
                       <span className="text-[10px] text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-500/30">
-                        Ultra Low Latency
+                        Fastest
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Fastest turn-taking for real-time speech and multimodal conversational dialogue.
+                    <p className="text-[11px] text-slate-300 mt-1 font-medium">
+                      1. Model 1: Fastest best for conversation
                     </p>
                   </button>
 
@@ -1119,18 +1135,18 @@ export default function App() {
                     disabled={callStatus !== 'idle'}
                     className={`p-3 rounded-xl border text-left transition-all ${
                       model === 'gemini-3.8-live-extended-thinking'
-                        ? 'border-purple-500 bg-purple-950/30'
+                        ? 'border-purple-500 bg-purple-950/30 ring-1 ring-purple-500/50'
                         : 'border-slate-800 bg-slate-900/50 hover:bg-slate-800'
                     } ${callStatus !== 'idle' ? 'opacity-60 cursor-not-allowed' : ''}`}
                   >
                     <div className="text-xs font-bold text-white flex items-center justify-between">
-                      <span>gemini-3.8-live-extended-thinking</span>
+                      <span>Model 2</span>
                       <span className="text-[10px] text-purple-400 bg-purple-950 px-2 py-0.5 rounded border border-purple-500/30">
-                        Deep Reasoning
+                        Complex & Technical
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Uses thinking budget for complex technical reasoning, multi-step tool calls, and logic puzzles.
+                    <p className="text-[11px] text-slate-300 mt-1 font-medium">
+                      2. Model 2 : Slow but best for Complex and Technical topics
                     </p>
                   </button>
                 </div>
@@ -1267,41 +1283,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Backend Server Gateway Host (For Render / Vercel Deployments) */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Render Backend Server URL
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowSettings(false);
-                      setShowBackendSetup(true);
-                    }}
-                    className="text-[10px] text-cyan-400 hover:text-cyan-300 underline"
-                  >
-                    Setup Guide
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  value={backendHost}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    const cleaned = cleanBackendHost(val);
-                    setBackendHost(val);
-                    saveBackendHost(cleaned);
-                  }}
-                  disabled={callStatus !== 'idle'}
-                  placeholder="যেমন: ai-teacher-xxxx.onrender.com"
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 text-xs text-cyan-300 font-mono placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
-                />
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Render-এ হোস্ট করা লাইভ ব্যাকএন্ড URL। Vercel ফ্রন্টএন্ড সরাসরি এর সাথে অডিও স্ট্রিম কানেক্ট করে।
-                </p>
-              </div>
-
               {callStatus !== 'idle' && (
                 <p className="text-[11px] text-amber-400/80 bg-amber-950/30 p-2.5 rounded-lg border border-amber-500/20">
                   Settings are locked during an active call. End the call to adjust model or voice configuration.
@@ -1320,20 +1301,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {/* Guide & Architecture Modal */}
-      <GuideModal isOpen={showGuide} onClose={() => setShowGuide(false)} />
-
-      {/* Backend Setup Modal */}
-      <BackendSetupModal
-        isOpen={showBackendSetup}
-        onClose={() => setShowBackendSetup(false)}
-        onSave={(newHost) => {
-          setBackendHost(newHost);
-          setErrorMessage(null);
-        }}
-        currentHost={backendHost}
-      />
 
       {/* Run Anywhere & Export Modal */}
       <RunAnywhereModal

@@ -1,58 +1,20 @@
 import React, { useState } from 'react';
-import { Play, Volume2, Check, Sparkles, Loader2, GraduationCap } from 'lucide-react';
+import { Play, Volume2, Check, Sparkles, Loader2, GraduationCap, BookOpen } from 'lucide-react';
 import { ALL_PERSONA_PRESETS, PersonaPreset } from '../data/teacherPersonas.ts';
 import { getHttpBaseUrl } from '../utils/backendConfig.ts';
 
 export interface VoiceOption {
   id: string;
   name: string;
-  gender: string;
-  tone: string;
-  description: string;
   accentColor: string;
 }
 
 export const VOICES: VoiceOption[] = [
-  {
-    id: 'Kore',
-    name: 'Kore (Kolkata Accent)',
-    gender: 'Female / Kolkata Indian',
-    tone: 'Indian English & Fluent Bangla',
-    description: 'Natural Kolkata accent. Warm and fluent in both English and Bengali speech.',
-    accentColor: 'from-pink-500 to-rose-600',
-  },
-  {
-    id: 'Charon',
-    name: 'Charon (Kolkata Accent)',
-    gender: 'Male / Resonant Teacher',
-    tone: 'Authentic Bengali Mentor',
-    description: 'Deep, authoritative Kolkata teacher cadence for bilingual SSC & WBPSC coaching.',
-    accentColor: 'from-purple-500 to-indigo-700',
-  },
-  {
-    id: 'Puck',
-    name: 'Puck',
-    gender: 'Playful / Upbeat',
-    tone: 'Spirited, engaging, curious',
-    description: 'Bright and energetic, great for rapid-fire drills and dynamic banter.',
-    accentColor: 'from-amber-500 to-orange-600',
-  },
-  {
-    id: 'Zephyr',
-    name: 'Zephyr',
-    gender: 'Neutral / Gentle',
-    tone: 'Smooth, balanced, modern',
-    description: 'Crisp and articulate with friendly, conversational pacing.',
-    accentColor: 'from-cyan-500 to-blue-600',
-  },
-  {
-    id: 'Fenrir',
-    name: 'Fenrir',
-    gender: 'Strong / Confident',
-    tone: 'Bold, commanding, direct',
-    description: 'Focused and energetic with crisp articulation for science and analytical subjects.',
-    accentColor: 'from-emerald-500 to-teal-700',
-  },
+  { id: 'Kore', name: 'Kore', accentColor: 'from-pink-500 to-rose-600' },
+  { id: 'Charon', name: 'Charon', accentColor: 'from-purple-500 to-indigo-700' },
+  { id: 'Puck', name: 'Puck', accentColor: 'from-amber-500 to-orange-600' },
+  { id: 'Zephyr', name: 'Zephyr', accentColor: 'from-cyan-500 to-blue-600' },
+  { id: 'Fenrir', name: 'Fenrir', accentColor: 'from-emerald-500 to-teal-700' },
 ];
 
 export const PERSONA_PRESETS = ALL_PERSONA_PRESETS;
@@ -80,9 +42,15 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
     if (playingVoiceId === voiceId) {
       if (audioElement) {
         audioElement.pause();
+        audioElement.currentTime = 0;
       }
       setPlayingVoiceId(null);
       return;
+    }
+
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.currentTime = 0;
     }
 
     try {
@@ -91,8 +59,8 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
 
       const sampleText =
         voiceId === 'Kore' || voiceId === 'Charon'
-          ? 'নমস্কার আরিফ! আমি কলকাতা অ্যাকসেন্টে বাংলা এবং ইংলিশ দুটোই ফ্লুয়েন্টলি বলতে পারি।'
-          : `Hello! I am ${voiceId}, your Live Voice AI partner.`;
+          ? 'নমস্কার! আমি মেগা কুইজ ভয়েস এআই।'
+          : `Hello! I am ${voiceId}.`;
 
       const res = await fetch(`${baseUrl}/api/gemini/voice-preview`, {
         method: 'POST',
@@ -127,22 +95,18 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
     }
   };
 
-  const bengaliTeachers = ALL_PERSONA_PRESETS.filter((p) => p.category === 'bengali-teachers');
-  const generalPersonas = ALL_PERSONA_PRESETS.filter((p) => p.category === 'general');
+  const wbbseList = ALL_PERSONA_PRESETS.filter((p) => p.category === 'wbbse');
+  const competitiveList = ALL_PERSONA_PRESETS.filter((p) => p.category === 'competitive-spoken');
 
   return (
     <div className="space-y-5">
+      {/* Voice Selection (Clean, no spam, name + preview button only) */}
       <div>
-        <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between mb-2.5">
-          <span className="flex items-center gap-1.5">
-            <Volume2 className="h-3.5 w-3.5 text-cyan-400" />
-            Select Live Voice
-          </span>
-          <span className="text-[10px] font-normal text-emerald-400">
-            Kore & Charon: Kolkata Bengali & Indian English
-          </span>
+        <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 mb-2.5">
+          <Volume2 className="h-3.5 w-3.5 text-cyan-400" />
+          <span>Select Live Voice</span>
         </label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
           {VOICES.map((v) => {
             const isSelected = selectedVoice === v.id;
             const isPlaying = playingVoiceId === v.id;
@@ -151,33 +115,23 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
               <div
                 key={v.id}
                 onClick={() => !disabled && onSelectVoice(v.id)}
-                className={`relative flex flex-col justify-between p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                className={`relative flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none ${
                   isSelected
-                    ? 'border-cyan-500 bg-cyan-950/30 shadow-lg shadow-cyan-500/10'
+                    ? 'border-cyan-500 bg-cyan-950/40 shadow-lg shadow-cyan-500/10'
                     : 'border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900'
                 } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
               >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-sm text-white flex items-center gap-1.5">
-                      <span className={`w-2 h-2 rounded-full bg-gradient-to-tr ${v.accentColor}`} />
-                      {v.name}
-                    </span>
-                    {isSelected && <Check className="h-4 w-4 text-cyan-400" />}
-                  </div>
-                  <div className="text-[11px] text-cyan-400/90 font-medium mt-0.5">{v.tone}</div>
-                  <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-tight">
-                    {v.description}
-                  </p>
+                <div className="flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full bg-gradient-to-tr ${v.accentColor}`} />
+                  <span className="font-semibold text-sm text-white">{v.name}</span>
                 </div>
 
-                <div className="mt-3 pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                  <span className="text-[10px] text-slate-500">{v.gender}</span>
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
                     disabled={disabled}
                     onClick={(e) => previewVoice(v.id, e)}
-                    className="flex items-center gap-1 text-[11px] font-medium text-slate-300 hover:text-cyan-400 transition-colors px-2 py-0.5 rounded bg-slate-800/80 hover:bg-slate-800"
+                    className="flex items-center gap-1 text-[11px] font-medium text-slate-300 hover:text-cyan-400 transition-colors px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700"
                     title={`Listen to sample of ${v.name}`}
                   >
                     {isPlaying ? (
@@ -185,8 +139,9 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
                     ) : (
                       <Play className="h-3 w-3 fill-current" />
                     )}
-                    {isPlaying ? 'Playing' : 'Preview'}
+                    <span className="text-[10px]">{isPlaying ? 'Playing' : 'Preview'}</span>
                   </button>
+                  {isSelected && <Check className="h-4 w-4 text-cyan-400 ml-1" />}
                 </div>
               </div>
             );
@@ -194,22 +149,68 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
         </div>
       </div>
 
-      {/* Persona Presets */}
-      <div className="space-y-3">
+      {/* Persona & Conversation Style (WBBSE and Competitive & Spoken only, subjects only) */}
+      <div className="space-y-4">
         <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
           <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
           Persona & Conversation Style
         </label>
 
-        {/* Bengali Teacher Personas */}
-        <div>
-          <div className="text-[11px] font-semibold text-amber-400 flex items-center gap-1.5 mb-2">
-            <GraduationCap className="h-3.5 w-3.5" />
-            <span>Dedicated Subject Mentors (History, Polity, Economy, Geo, Sci-Tech, GK, English)</span>
+        {/* 1. WBBSE Section */}
+        <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/40 via-slate-900/70 to-slate-950 p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+              <BookOpen className="h-4 w-4 text-emerald-400" />
+              WBBSE
+            </span>
+            <span className="text-[10px] text-emerald-300 bg-emerald-950/90 border border-emerald-500/40 px-2 py-0.5 rounded-full font-medium">
+              Class V - X
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {wbbseList.map((p) => {
+              const isActive = systemInstruction.includes(p.prompt.slice(0, 50));
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => handleSelectPreset(p)}
+                  className={`text-left p-3 rounded-xl border transition-all ${
+                    isActive
+                      ? 'border-emerald-400 bg-emerald-950/60 shadow-md shadow-emerald-500/20 ring-1 ring-emerald-400/50'
+                      : 'border-slate-800 bg-slate-900/60 hover:bg-slate-900 hover:border-emerald-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-white">{p.title}</span>
+                    <span className="text-[9px] text-emerald-300 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-500/30 font-semibold">
+                      {p.badge}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-1 leading-snug">
+                    {p.desc}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 2. Competitive & Spoken Section */}
+        <div className="rounded-2xl border border-amber-500/30 bg-slate-900/40 p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+              <GraduationCap className="h-4 w-4" />
+              Competitive & Spoken
+            </span>
+            <span className="text-[10px] text-amber-400/90 bg-amber-950/70 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
+              Competitive & Spoken
+            </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-            {bengaliTeachers.map((p) => {
-              const isActive = systemInstruction.includes(p.title);
+            {competitiveList.map((p) => {
+              const isActive = systemInstruction.includes(p.prompt.slice(0, 50));
               return (
                 <button
                   key={p.id}
@@ -231,34 +232,6 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
                   <div className="text-[10px] text-slate-400 mt-1 line-clamp-2 leading-tight">
                     {p.desc}
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* General AI Companions */}
-        <div>
-          <div className="text-[11px] font-semibold text-slate-400 mb-2">
-            General AI Companions
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {generalPersonas.map((p) => {
-              const isActive = systemInstruction.includes(p.title);
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => handleSelectPreset(p)}
-                  className={`text-left p-2.5 rounded-lg border transition-all ${
-                    isActive
-                      ? 'border-cyan-500 bg-cyan-950/40'
-                      : 'border-slate-800 bg-slate-900/40 hover:bg-slate-900 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="text-xs font-semibold text-slate-200">{p.title}</div>
-                  <div className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">{p.desc}</div>
                 </button>
               );
             })}
