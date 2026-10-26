@@ -25,6 +25,7 @@ import {
   Eye,
   Gauge,
   Sliders,
+  Server,
 } from 'lucide-react';
 import { LiveAudioPlayer, LiveAudioRecorder } from './utils/audio.ts';
 import { AudioOrb } from './components/AudioOrb.tsx';
@@ -32,6 +33,8 @@ import { GuideModal } from './components/GuideModal.tsx';
 import { VoiceSelector, VOICES } from './components/VoiceSelector.tsx';
 import { TranscriptView, TranscriptItem } from './components/TranscriptView.tsx';
 import { RunAnywhereModal } from './components/RunAnywhereModal.tsx';
+import { BackendSetupModal } from './components/BackendSetupModal.tsx';
+import { getSavedBackendHost, cleanBackendHost, saveBackendHost, getWsUrl } from './utils/backendConfig.ts';
 import {
   SHREYA_MAAM_PROMPT,
   BHATTACHARYA_SIR_PROMPT,
@@ -51,24 +54,8 @@ export default function App() {
   const [model, setModel] = useState<'gemini-3.8-live' | 'gemini-3.8-live-extended-thinking'>('gemini-3.8-live');
   const [voice, setVoice] = useState<string>('Kore');
   const [systemInstruction, setSystemInstruction] = useState<string>(SHREYA_MAAM_PROMPT);
-  const [backendHost, setBackendHost] = useState<string>(() => {
-    if ((import.meta as any).env?.VITE_BACKEND_HOST) {
-      return (import.meta as any).env.VITE_BACKEND_HOST;
-    }
-    if (typeof window !== 'undefined') {
-      const host = window.location.hostname;
-      // If deployed on Vercel, GitHub Pages, Netlify, or any custom domain (not local or Cloud Run)
-      if (
-        host.endsWith('github.io') ||
-        host.endsWith('vercel.app') ||
-        host.endsWith('netlify.app') ||
-        (!host.includes('run.app') && host !== 'localhost' && host !== '127.0.0.1' && !host.startsWith('192.168.'))
-      ) {
-        return 'ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app';
-      }
-    }
-    return '';
-  });
+  const [backendHost, setBackendHost] = useState<string>(() => getSavedBackendHost());
+  const [showBackendSetup, setShowBackendSetup] = useState(false);
 
   // Audio & Video State
   const [isMicMuted, setIsMicMuted] = useState(false);
@@ -199,20 +186,28 @@ export default function App() {
       audioPlayerRef.current?.init();
 
       // 2. Connect WebSocket to server
-      const defaultRemoteProxy = 'ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app';
-      let wsHost = backendHost.trim();
-      if (!wsHost) {
-        if (typeof window !== 'undefined') {
-          const hostname = window.location.hostname;
-          if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('run.app')) {
-            wsHost = window.location.host;
-          } else {
-            wsHost = defaultRemoteProxy;
-          }
-        } else {
-          wsHost = defaultRemoteProxy;
+      let wsHost = cleanBackendHost(backendHost) || getSavedBackendHost();
+      if (!wsHost && typeof window !== 'undefined') {
+        const hostname = window.location.hostname;
+        if (
+          hostname === 'localhost' ||
+          hostname === '127.0.0.1' ||
+          hostname.includes('run.app') ||
+          hostname.includes('onrender.com') ||
+          hostname.includes('railway.app')
+        ) {
+          wsHost = window.location.host;
         }
       }
+
+      if (!wsHost) {
+        setCallStatus('idle');
+        setStatusMessage('Render Backend লিঙ্ক প্রয়োজন');
+        setShowBackendSetup(true);
+        setErrorMessage('Vercel-এ লাইভ ভয়েস কথা বলার জন্য আপনার Render ব্যাকএন্ড লিঙ্কটি দিন।');
+        return;
+      }
+
       const isLocal = wsHost.includes('localhost') || wsHost.includes('127.0.0.1');
       const protocol = isLocal ? 'ws:' : 'wss:';
       const wsUrl = `${protocol}//${wsHost}/live-ws`;
@@ -360,9 +355,9 @@ export default function App() {
       ws.onerror = (err) => {
         console.error('WebSocket error:', err);
         const host = typeof window !== 'undefined' ? window.location.hostname : '';
-        if (host.includes('vercel.app')) {
+        if (host.includes('vercel.app') || host.includes('github.io')) {
           setErrorMessage(
-            'Connection notice: Vercel does not support continuous audio WebSockets. Please host your live Node backend on Render.com or Railway (free 1-click), or configure your Backend Gateway in Settings.'
+            'ব্যাকএন্ড কানেক্ট করা যায়নি। Render সার্ভিসটি Active আছে কিনা চেক করুন অথবা Configure Backend-এ গিয়ে আপনার Render লিঙ্কটি দিন।'
           );
         } else {
           setErrorMessage('Connection issue detected. Please check network connectivity and microphone access.');
@@ -683,6 +678,16 @@ export default function App() {
             <span className="text-[10px]">Chat</span>
           </button>
 
+          {/* Backend Server Configuration Button */}
+          <button
+            onClick={() => setShowBackendSetup(true)}
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-950/30 hover:bg-cyan-900/40 text-cyan-300 text-xs font-semibold transition-all shadow-sm shadow-cyan-500/10"
+            title="Backend Server Configuration"
+          >
+            <Server className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-cyan-400" />
+            <span className="hidden sm:inline">Backend</span>
+          </button>
+
           {/* Run Anywhere / Standalone Button */}
           <button
             onClick={() => setShowRunAnywhere(true)}
@@ -716,35 +721,56 @@ export default function App() {
         </div>
       </header>
 
-      {/* GitHub Pages Host Banner */}
-      {typeof window !== 'undefined' && window.location.hostname.endsWith('github.io') && (
-        <div className="bg-emerald-950/60 border-b border-emerald-800/60 px-4 py-1.5 text-[11px] text-emerald-300 flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>GitHub Pages Deployment active • Connected to Gemini Live backend ({backendHost || 'ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app'})</span>
+      {/* Deployment & Backend Connection Banner */}
+      {typeof window !== 'undefined' &&
+        (window.location.hostname.endsWith('vercel.app') || window.location.hostname.endsWith('github.io')) && (
+          <div className="bg-slate-900/90 border-b border-slate-800 px-4 py-2 text-[11px] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  backendHost ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400 animate-ping'
+                }`}
+              />
+              <span className={backendHost ? 'text-emerald-300' : 'text-amber-300'}>
+                {backendHost ? (
+                  <>
+                    Backend Connected: <span className="font-mono text-cyan-300">{backendHost}</span>
+                  </>
+                ) : (
+                  'লাইভ ভয়েস কথা বলার জন্য Render ব্যাকএন্ড লিঙ্ক কানেক্ট করুন।'
+                )}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowBackendSetup(true)}
+              className="text-xs px-2.5 py-0.5 rounded bg-cyan-600/80 hover:bg-cyan-500 text-white font-medium ml-2 transition-colors"
+            >
+              {backendHost ? 'Change Server' : 'Connect Render'}
+            </button>
           </div>
-          <button
-            onClick={() => setShowSettings(true)}
-            className="underline text-emerald-200 hover:text-white text-[11px] ml-2"
-          >
-            Configure
-          </button>
-        </div>
-      )}
+        )}
 
-      {/* Error Banner */}
+      {/* Error Banner with 1-Click Fix Button */}
       {errorMessage && (
-        <div className="flex items-center justify-between bg-red-950/80 border-b border-red-800 px-4 py-2.5 text-xs text-red-200">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between bg-red-950/90 border-b border-red-800 px-4 py-2.5 text-xs text-red-200">
+          <div className="flex items-center gap-2 min-w-0">
             <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
-            <span>{errorMessage}</span>
+            <span className="truncate">{errorMessage}</span>
           </div>
-          <button
-            onClick={() => setErrorMessage(null)}
-            className="text-red-300 hover:text-white text-xs underline ml-4"
-          >
-            Dismiss
-          </button>
+          <div className="flex items-center gap-2 shrink-0 ml-4">
+            <button
+              onClick={() => setShowBackendSetup(true)}
+              className="rounded bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-2.5 py-1 text-xs shadow-sm transition-colors"
+            >
+              Configure Backend
+            </button>
+            <button
+              onClick={() => setErrorMessage(null)}
+              className="text-red-300 hover:text-white text-xs underline"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -1241,21 +1267,38 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Backend Gateway Host (For GitHub Pages / Remote Deployments) */}
+              {/* Backend Server Gateway Host (For Render / Vercel Deployments) */}
               <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-                  Backend Gateway Host
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                    Render Backend Server URL
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSettings(false);
+                      setShowBackendSetup(true);
+                    }}
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300 underline"
+                  >
+                    Setup Guide
+                  </button>
+                </div>
                 <input
                   type="text"
                   value={backendHost}
-                  onChange={(e) => setBackendHost(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const cleaned = cleanBackendHost(val);
+                    setBackendHost(val);
+                    saveBackendHost(cleaned);
+                  }}
                   disabled={callStatus !== 'idle'}
-                  placeholder="e.g. ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app"
+                  placeholder="যেমন: ai-teacher-xxxx.onrender.com"
                   className="w-full rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 text-xs text-cyan-300 font-mono placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
-                  GitHub Pages hosts static files. It automatically routes WebSocket voice traffic to this live backend.
+                  Render-এ হোস্ট করা লাইভ ব্যাকএন্ড URL। Vercel ফ্রন্টএন্ড সরাসরি এর সাথে অডিও স্ট্রিম কানেক্ট করে।
                 </p>
               </div>
 
@@ -1281,17 +1324,22 @@ export default function App() {
       {/* Guide & Architecture Modal */}
       <GuideModal isOpen={showGuide} onClose={() => setShowGuide(false)} />
 
+      {/* Backend Setup Modal */}
+      <BackendSetupModal
+        isOpen={showBackendSetup}
+        onClose={() => setShowBackendSetup(false)}
+        onSave={(newHost) => {
+          setBackendHost(newHost);
+          setErrorMessage(null);
+        }}
+        currentHost={backendHost}
+      />
+
       {/* Run Anywhere & Export Modal */}
       <RunAnywhereModal
         isOpen={showRunAnywhere}
         onClose={() => setShowRunAnywhere(false)}
-        sharedAppUrl={
-          typeof window !== 'undefined'
-            ? (window.location.origin.includes('localhost')
-                ? 'https://ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app'
-                : window.location.origin)
-            : 'https://ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app'
-        }
+        sharedAppUrl={typeof window !== 'undefined' ? window.location.origin : ''}
       />
 
       {/* Mobile Transcript Modal */}

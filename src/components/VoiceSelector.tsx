@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Play, Volume2, Check, Sparkles, Loader2, GraduationCap } from 'lucide-react';
 import { ALL_PERSONA_PRESETS, PersonaPreset } from '../data/teacherPersonas.ts';
+import { getHttpBaseUrl } from '../utils/backendConfig.ts';
 
 export interface VoiceOption {
   id: string;
@@ -86,15 +87,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
 
     try {
       setPlayingVoiceId(voiceId);
-      const isExternalHost =
-        typeof window !== 'undefined' &&
-        (window.location.hostname.endsWith('github.io') ||
-          window.location.hostname.endsWith('vercel.app') ||
-          window.location.hostname.endsWith('netlify.app') ||
-          (!window.location.hostname.includes('run.app') &&
-            window.location.hostname !== 'localhost' &&
-            window.location.hostname !== '127.0.0.1'));
-      const baseUrl = isExternalHost ? 'https://ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app' : '';
+      const baseUrl = getHttpBaseUrl();
 
       const sampleText =
         voiceId === 'Kore' || voiceId === 'Charon'
