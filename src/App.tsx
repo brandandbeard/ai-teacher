@@ -34,6 +34,7 @@ import { VoiceSelector, VOICES } from './components/VoiceSelector.tsx';
 import { TranscriptView, TranscriptItem } from './components/TranscriptView.tsx';
 import { getSavedBackendHost, cleanBackendHost, getWsUrl } from './utils/backendConfig.ts';
 import {
+  NON_STOP_TEACHING_SYSTEM_RULE,
   SHREYA_MAAM_PROMPT,
   BHATTACHARYA_SIR_PROMPT,
   SARMAD_MEHRAJ_SIR_PROMPT,
@@ -66,7 +67,7 @@ export default function App() {
 
   // Speed & Sensitivity Controls
   const [speechSpeed, setSpeechSpeed] = useState<number>(1.0);
-  const [micSensitivity, setMicSensitivity] = useState<number>(80); // Wide range 10 to 100, default 80 (High sensitivity)
+  const [micSensitivity, setMicSensitivity] = useState<number>(60); // Balanced by default (60%)
   const [silenceWait, setSilenceWait] = useState<number>(1.25); // Silence pause wait time in seconds (Default 1.25s)
 
   // Telemetry & UI
@@ -90,6 +91,7 @@ export default function App() {
   const meterIntervalRef = useRef<number | null>(null);
   const callStatusRef = useRef<CallStatus>(callStatus);
   const lastResumptionHandleRef = useRef<string | null>(null);
+  const inactivityTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     callStatusRef.current = callStatus;
@@ -151,6 +153,27 @@ export default function App() {
       ];
     });
   }, []);
+
+  // Clear silence / inactivity auto-disconnect timer
+  const clearInactivityTimer = useCallback(() => {
+    if (inactivityTimeoutRef.current) {
+      window.clearTimeout(inactivityTimeoutRef.current);
+      inactivityTimeoutRef.current = null;
+    }
+  }, []);
+
+  // Arm 22s silence auto-disconnect timer (saves quota if student sleeps/leaves)
+  const armInactivityTimer = useCallback((delayMs = 22000) => {
+    clearInactivityTimer();
+    inactivityTimeoutRef.current = window.setTimeout(() => {
+      if (callStatusRef.current !== 'idle') {
+        stopCall();
+        setStatusMessage('কোনো সাড়া না পাওয়ায় কল বিচ্ছিন্ন হয়েছে');
+        setErrorMessage('ছাত্রের কোনো সাড়া না পাওয়ায় AI কোটা সংরক্ষণের জন্য কলটি স্বয়ংক্রিয়ভাবে ডিসকানেক্ট করা হয়েছে।');
+        addTranscript('system', 'ছাত্র কোনো উত্তর না দেওয়ায় AI কোটা অপচয় রোধ করতে কলটি স্বয়ংক্রিয়ভাবে ডিসকানেক্ট করা হলো।');
+      }
+    }, delayMs);
+  }, [clearInactivityTimer]);
 
   // Seamless Session Renewal
   const renewSession = useCallback(() => {
@@ -217,13 +240,17 @@ export default function App() {
         const speedInstruction = speechSpeed !== 1.0
           ? `\nSpeaking Pace: Please speak at an overall ${speechSpeed > 1.0 ? 'slightly brisk' : 'relaxed/slower'} speaking pace (${speechSpeed}x speed).`
           : '';
+        const effectiveInstruction = systemInstruction.includes('NON-STOP CONTINUOUS TEACHING')
+          ? systemInstruction + speedInstruction
+          : `${systemInstruction}\n\n${NON_STOP_TEACHING_SYSTEM_RULE}${speedInstruction}`;
+
         // Dispatch session start config with resumption token if available
         ws.send(
           JSON.stringify({
             type: 'start',
             model,
             voice,
-            systemInstruction: systemInstruction + speedInstruction,
+            systemInstruction: effectiveInstruction,
             resumeHandle: lastResumptionHandleRef.current || undefined,
           })
         );
@@ -306,6 +333,7 @@ export default function App() {
           }
 
           if (msg.type === 'audio' && msg.data) {
+            clearInactivityTimer();
             setChunksReceived((c) => c + 1);
             audioPlayerRef.current?.playChunk(msg.data);
           }
@@ -326,6 +354,7 @@ export default function App() {
           }
 
           if (msg.type === 'interrupted') {
+            clearInactivityTimer();
             audioPlayerRef.current?.stopAndClear();
             setCallStatus('interrupted');
             setStatusMessage('Interrupted. AI stopped speaking.');
@@ -336,6 +365,7 @@ export default function App() {
           if (msg.type === 'turn_complete') {
             // Model finished speaking turn
             setStatusMessage('Listening to you...');
+            armInactivityTimer(22000); // Auto-disconnect if 22s silent after question
           }
 
           if (msg.type === 'error') {
@@ -389,10 +419,12 @@ export default function App() {
         undefined, // onSilence
         (isSpeaking) => {
           if (isSpeaking) {
+            clearInactivityTimer();
             setStatusMessage('Listening to your voice...');
           }
         },
         () => {
+          clearInactivityTimer();
           // Exactly after 1.25s silence has elapsed: notify server turn is complete!
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             wsRef.current.send(
@@ -413,6 +445,7 @@ export default function App() {
 
   // Stop Call Handler
   const stopCall = () => {
+    clearInactivityTimer();
     callStatusRef.current = 'idle';
     // Stop timers
     if (timerIntervalRef.current) {
@@ -586,6 +619,7 @@ export default function App() {
     if (!typedMessage.trim()) return;
 
     const text = typedMessage.trim();
+    clearInactivityTimer();
     setTypedMessage('');
     addTranscript('user', text);
 
