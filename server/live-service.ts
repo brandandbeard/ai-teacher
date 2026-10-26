@@ -126,6 +126,7 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
       modelName: string;
       voiceName: string;
       systemInstruction: string;
+      contextSummary?: any;
     } = {
       modelName: "gemini-3.8-live",
       voiceName: "Kore",
@@ -145,8 +146,8 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
       }
     }, 10000);
 
-    // Helper to connect or reconnect to Gemini Live API
-    async function establishGeminiSession(resumeHandle?: string | null) {
+    // Helper to connect or reconnect to Gemini Live API with durable context fallback
+    async function establishGeminiSession(resumeHandle?: string | null, retryWithoutHandle = false) {
       const apiKey = getApiKey();
       if (!apiKey) {
         clientWs.send(
@@ -205,6 +206,8 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
         },
       ];
 
+      const effectiveHandle = retryWithoutHandle ? undefined : (resumeHandle || lastResumptionHandle || undefined);
+
       try {
         if (liveSession) {
           try {
@@ -213,7 +216,7 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
           liveSession = null;
         }
 
-        const effectiveHandle = resumeHandle || lastResumptionHandle || undefined;
+        console.log(`[LiveGateway] Connecting to Gemini Live (${modelName}) ${effectiveHandle ? `with resumption handle: ${effectiveHandle.slice(0, 16)}...` : '(fresh session)'}`);
 
         liveSession = await ai.live.connect({
           model: modelName,
@@ -252,7 +255,7 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
 
               // 2. Handle GoAway warning (issued ~60s before Google rotates the physical WebSocket)
               if (serverMsg.goAway) {
-                console.log("Gemini Live server issued GoAway warning. Time left:", serverMsg.goAway.timeLeft);
+                console.log("[LiveGateway] Gemini Live server issued GoAway warning. Time left:", serverMsg.goAway.timeLeft);
                 clientWs.send(
                   JSON.stringify({
                     type: "go_away",
@@ -290,7 +293,18 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
                 }
               }
 
-              // 4. Handle interrupted event
+              // 4. Handle user speech transcription from Gemini Live inputAudioTranscription
+              const userTranscript = (serverMsg.serverContent as any)?.inputTranscription?.text;
+              if (userTranscript) {
+                clientWs.send(
+                  JSON.stringify({
+                    type: "user_transcript",
+                    text: userTranscript,
+                  })
+                );
+              }
+
+              // 5. Handle interrupted event
               if (serverMsg.serverContent?.interrupted) {
                 clientWs.send(
                   JSON.stringify({
@@ -299,7 +313,7 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
                 );
               }
 
-              // 5. Handle turn completion
+              // 6. Handle turn completion
               if (serverMsg.serverContent?.turnComplete) {
                 clientWs.send(
                   JSON.stringify({
@@ -308,7 +322,7 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
                 );
               }
 
-              // 6. Handle function / tool calling
+              // 7. Handle function / tool calling
               if (serverMsg.toolCall) {
                 const functionCalls = serverMsg.toolCall.functionCalls;
                 if (functionCalls && liveSession) {
@@ -363,9 +377,9 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
               isConnected = false;
               // If client is still connected, automatically resume session seamlessly!
               if (clientWs.readyState === WebSocket.OPEN && !isReconnecting) {
-                console.log("Gemini Live session closed by server. Auto-resuming with handle:", lastResumptionHandle);
+                console.log("[LiveGateway] Gemini Live session closed by server. Auto-resuming with handle:", lastResumptionHandle);
                 reconnectSession("Session connection renewed");
-              } else {
+              } else if (clientWs.readyState === WebSocket.OPEN) {
                 clientWs.send(
                   JSON.stringify({
                     type: "session_timeout",
@@ -377,7 +391,7 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
               }
             },
             onerror: (err: any) => {
-              console.error("Gemini Live API error:", err);
+              console.error("[LiveGateway] Gemini Live API error:", err);
               clientWs.send(
                 JSON.stringify({
                   type: "error",
@@ -413,13 +427,23 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
             model: modelName,
             voice: voiceName,
             resumptionHandle: lastResumptionHandle,
+            resumed: Boolean(effectiveHandle),
             message: effectiveHandle
               ? "Gemini Live session resumed seamlessly (context preserved)!"
               : "Gemini Live session connected and ready for conversation!",
           })
         );
       } catch (connectErr: any) {
-        console.error("Live connect error:", connectErr);
+        console.error("[LiveGateway] Live connect error:", connectErr);
+        // CRITICAL RESUMPTION FALLBACK: If handle was rejected (expired/invalid 400),
+        // fallback seamlessly to fresh session with durable context injection instead of failing!
+        if (effectiveHandle && !retryWithoutHandle) {
+          console.warn("[LiveGateway] Resumption handle rejected or expired. Seamlessly falling back to fresh session with durable context...");
+          lastResumptionHandle = null;
+          await establishGeminiSession(null, true);
+          return;
+        }
+
         isReconnecting = false;
         clientWs.send(
           JSON.stringify({
@@ -431,9 +455,12 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
     }
 
     async function reconnectSession(reason = "auto-renew") {
-      if (isReconnecting) return;
+      if (isReconnecting) {
+        console.log(`[LiveGateway] Reconnect already in progress (${reason}), skipping duplicate call.`);
+        return;
+      }
       isReconnecting = true;
-      console.log(`Executing seamless Gemini Live session renewal (${reason})...`);
+      console.log(`[LiveGateway] Executing seamless Gemini Live session renewal (${reason})...`);
       clientWs.send(
         JSON.stringify({
           type: "status",
@@ -456,12 +483,20 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
         const message = JSON.parse(rawMessage.toString());
 
         if (message.type === "start") {
+          const contextSummary = message.contextSummary;
+          let sysInstruction = message.systemInstruction ||
+            "You are a friendly, highly capable real-time conversational AI. Keep spoken responses clear, lively, concise, and natural.";
+
+          // If a lesson was already ongoing and context summary has active topic, guarantee continuity:
+          if (contextSummary && contextSummary.currentTopic && !sysInstruction.includes("DURABLE ONGOING LESSON CONTEXT")) {
+            sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: Subject="${contextSummary.subject || 'WBBSE Science'}", Class="${contextSummary.classGrade || 'Class 10'}", Chapter="${contextSummary.chapter || ''}", Topic="${contextSummary.currentTopic}". DO NOT say any initial greeting or ask what to study. Immediately resume continuous teaching of this topic.]`;
+          }
+
           sessionParams = {
             modelName: message.model || "gemini-3.8-live",
             voiceName: message.voice || "Kore",
-            systemInstruction:
-              message.systemInstruction ||
-              "You are a friendly, highly capable real-time conversational AI. Keep spoken responses clear, lively, concise, and natural.",
+            systemInstruction: sysInstruction,
+            contextSummary,
           };
 
           const resumeHandle = message.resumeHandle || message.resumptionHandle || null;
