@@ -155,10 +155,10 @@ if __name__ == "__main__":
             </div>
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                Use Gemini Live Anywhere
+                Use Live Voice AI Anywhere
               </h2>
               <p className="text-xs text-slate-400">
-                You do NOT need to stay in Google AI Studio to run this app!
+                Created by Arif Hussain • Standalone & Mobile Deployments
               </p>
             </div>
           </div>
@@ -431,15 +431,34 @@ if __name__ == "__main__":
                 </div>
               </div>
 
-              {/* Real-time Voice Architecture Note */}
-              <div className="rounded-xl border border-emerald-500/40 bg-emerald-950/20 p-4 space-y-2 text-xs">
-                <div className="font-bold text-emerald-300 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4" />
-                  <span>লাইভ ভয়েস ও ওয়েবসকেট সংযোগের অটো-কনফিগারেশন:</span>
+              {/* Real-time Voice Architecture Note & Vercel Fix */}
+              <div className="rounded-xl border border-amber-500/40 bg-amber-950/20 p-4 space-y-3 text-xs">
+                <div className="font-bold text-amber-300 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-amber-400 shrink-0" />
+                  <span>Vercel-এ "Connection issue detected" দেখালে সমাধান:</span>
                 </div>
-                <p className="text-slate-300 leading-relaxed">
-                  জেমিলাইভ (Gemini Live) রিয়েল-টাইম বাইডিরেকশনাল অডিও স্ট্রিমিংয়ের জন্য পারসিস্টেন্ট WebSocket ব্যবহার করে। আপনার অ্যাপটিতে ইতিমধ্যে কোড আপডেট করা হয়েছে যাতে Vercel বা আপনার কাস্টম ডোমেন থেকে খুললেও এটি স্বয়ংক্রিয়ভাবে ক্লাউড প্রক্সি ব্যাকএন্ডের (<code className="text-cyan-300">ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app</code>) সঙ্গে রিয়েল-টাইম অডিও কানেক্ট হয়ে যায়। ফলে Vercel-এ কোনো বাড়তি জটিলতা ছাড়াই আপনার কাস্টম ডোমেনে ভয়েস কল পুরোপুরি পারফেক্টলি চলবে!
-                </p>
+                <div className="text-slate-300 space-y-2 leading-relaxed">
+                  <p>
+                    <strong>কেন এটি হয়:</strong> Vercel শুধুমাত্র স্ট্যাটিক সাইট ও সার্ভারলেস রিকোয়েস্ট হ্যান্ডেল করে। লাইভ ভয়েস কলের জন্য একটি সার্বক্ষণিক <strong>WebSocket</strong> সার্ভার প্রয়োজন, যা Vercel সার্ভারলেস ফাংশনে সরাসরি চলে না।
+                  </p>
+                  <p className="text-emerald-300 font-semibold">
+                    সহজ সমাধান (১ মিনিট লাগবে):
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-300">
+                    <li>
+                      <strong>Render.com</strong>-এ গিয়ে বিনামূল্যে <strong>New &gt; Web Service</strong> ক্লিক করে আপনার এই GitHub রিপোজিটরিটি সিলেক্ট করুন।
+                    </li>
+                    <li>
+                      Environment Variable-এ <code className="text-cyan-300">GEMINI_API_KEY</code> যুক্ত করে <strong>Deploy</strong> চাপুন। Render আপনাকে একটি ফ্রি ব্যাকএন্ড লিঙ্ক দেবে (যেমন: <code className="text-emerald-400">ariflive.onrender.com</code>)।
+                    </li>
+                    <li>
+                      আপনার Vercel ড্যাশবোর্ডে গিয়ে <strong>Settings &gt; Environment Variables</strong>-এ নাম দিন <code className="text-cyan-300">VITE_BACKEND_HOST</code> এবং ভ্যালু দিন <code className="text-emerald-400">ariflive.onrender.com</code>। এরপর রি-ডেপ্লয় করুন।
+                    </li>
+                  </ol>
+                  <p className="text-slate-400 text-[11px] pt-1">
+                    অথবা সরাসরি অ্যাপের <strong>Settings &gt; Backend Gateway Host</strong> বক্সেও আপনার Render হোস্ট লিঙ্কটি লিখে দিলে সঙ্গে সঙ্গে লাইভ ভয়েস চালু হয়ে যাবে!
+                  </p>
+                </div>
               </div>
             </div>
           )}

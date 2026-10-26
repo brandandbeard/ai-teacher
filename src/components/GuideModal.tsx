@@ -138,7 +138,7 @@ function handleInterruption() {
             </div>
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                How to Use Google Live (Multimodal Live API)
+                How to Use Live Voice AI
               </h2>
               <p className="text-xs text-slate-400">Complete architectural guide, protocols, and best practices</p>
             </div>

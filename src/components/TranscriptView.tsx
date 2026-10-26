@@ -38,7 +38,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ items, onClear, 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `gemini-live-transcript-${Date.now()}.txt`;
+    a.download = `live-voice-transcript-${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -96,7 +96,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ items, onClear, 
             <Clock className="h-8 w-8 mb-2 opacity-30 text-cyan-400" />
             <p className="font-medium text-slate-400">No dialogue yet</p>
             <p className="text-[11px] text-slate-600 mt-1 max-w-xs">
-              Start the live conversation or type a message below to speak with Gemini Live in real-time.
+              Start the live conversation or type a message below to speak with your AI mentor in real-time.
             </p>
           </div>
         ) : (
@@ -155,7 +155,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ items, onClear, 
                 >
                   <div className="flex items-center justify-between gap-3 mb-1 text-[10px] opacity-75">
                     <span className="font-semibold">
-                      {isUser ? 'You' : `Gemini Live (${voiceName})`}
+                      {isUser ? 'You' : `AI Mentor (${voiceName})`}
                     </span>
                     <span className="font-mono">{item.timestamp}</span>
                   </div>

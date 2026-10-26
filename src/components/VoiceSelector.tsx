@@ -99,7 +99,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
       const sampleText =
         voiceId === 'Kore' || voiceId === 'Charon'
           ? 'নমস্কার আরিফ! আমি কলকাতা অ্যাকসেন্টে বাংলা এবং ইংলিশ দুটোই ফ্লুয়েন্টলি বলতে পারি।'
-          : `Hello! I am ${voiceId}, your Google Gemini Live voice partner.`;
+          : `Hello! I am ${voiceId}, your Live Voice AI partner.`;
 
       const res = await fetch(`${baseUrl}/api/gemini/voice-preview`, {
         method: 'POST',
@@ -143,7 +143,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
         <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between mb-2.5">
           <span className="flex items-center gap-1.5">
             <Volume2 className="h-3.5 w-3.5 text-cyan-400" />
-            Select Gemini Live Voice
+            Select Live Voice
           </span>
           <span className="text-[10px] font-normal text-emerald-400">
             Kore & Charon: Kolkata Bengali & Indian English
@@ -279,7 +279,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
             disabled={disabled}
             rows={3}
             className="w-full rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-200 placeholder-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 disabled:opacity-60 font-mono resize-none leading-relaxed"
-            placeholder="Custom system instructions for Gemini Live..."
+            placeholder="Custom system instructions for Live Voice AI..."
           />
         </div>
       </div>

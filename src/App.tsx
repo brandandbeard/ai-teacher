@@ -90,6 +90,7 @@ export default function App() {
   const [showGuide, setShowGuide] = useState(false);
   const [showRunAnywhere, setShowRunAnywhere] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMobileTranscript, setShowMobileTranscript] = useState(false);
   const [typedMessage, setTypedMessage] = useState('');
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -170,7 +171,7 @@ export default function App() {
   // Seamless Session Renewal
   const renewSession = useCallback(() => {
     if (callStatusRef.current === 'idle') return;
-    setStatusMessage('Seamlessly renewing Gemini session...');
+    setStatusMessage('Seamlessly renewing voice session...');
     startCall(true);
   }, []);
 
@@ -198,9 +199,20 @@ export default function App() {
       audioPlayerRef.current?.init();
 
       // 2. Connect WebSocket to server
-      const isGitHubPages = typeof window !== 'undefined' && window.location.hostname.endsWith('github.io');
       const defaultRemoteProxy = 'ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app';
-      const wsHost = backendHost.trim() || (isGitHubPages ? defaultRemoteProxy : window.location.host);
+      let wsHost = backendHost.trim();
+      if (!wsHost) {
+        if (typeof window !== 'undefined') {
+          const hostname = window.location.hostname;
+          if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.includes('run.app')) {
+            wsHost = window.location.host;
+          } else {
+            wsHost = defaultRemoteProxy;
+          }
+        } else {
+          wsHost = defaultRemoteProxy;
+        }
+      }
       const isLocal = wsHost.includes('localhost') || wsHost.includes('127.0.0.1');
       const protocol = isLocal ? 'ws:' : 'wss:';
       const wsUrl = `${protocol}//${wsHost}/live-ws`;
@@ -210,7 +222,7 @@ export default function App() {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        setStatusMessage('Connecting to Gemini Live TPU stream...');
+        setStatusMessage('Connecting to Live Voice stream...');
         const speedInstruction = speechSpeed !== 1.0
           ? `\nSpeaking Pace: Please speak at an overall ${speechSpeed > 1.0 ? 'slightly brisk' : 'relaxed/slower'} speaking pace (${speechSpeed}x speed).`
           : '';
@@ -325,14 +337,14 @@ export default function App() {
           if (msg.type === 'interrupted') {
             audioPlayerRef.current?.stopAndClear();
             setCallStatus('interrupted');
-            setStatusMessage('Interrupted. Gemini stopped speaking.');
-            addTranscript('system', 'Gemini interrupted by user');
+            setStatusMessage('Interrupted. AI stopped speaking.');
+            addTranscript('system', 'AI interrupted by user');
             setTimeout(() => setCallStatus('active'), 1200);
           }
 
           if (msg.type === 'turn_complete') {
             // Model finished speaking turn
-            setStatusMessage('Gemini listening...');
+            setStatusMessage('Listening to you...');
           }
 
           if (msg.type === 'error') {
@@ -347,7 +359,14 @@ export default function App() {
 
       ws.onerror = (err) => {
         console.error('WebSocket error:', err);
-        setErrorMessage('Connection issue detected.');
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        if (host.includes('vercel.app')) {
+          setErrorMessage(
+            'Connection notice: Vercel does not support continuous audio WebSockets. Please host your live Node backend on Render.com or Railway (free 1-click), or configure your Backend Gateway in Settings.'
+          );
+        } else {
+          setErrorMessage('Connection issue detected. Please check network connectivity and microphone access.');
+        }
       };
 
       ws.onclose = () => {
@@ -610,24 +629,24 @@ export default function App() {
   return (
     <div className="flex h-screen w-full flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* Top Navigation Bar */}
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-800/80 px-4 sm:px-6 bg-slate-950/70 backdrop-blur-md z-30">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-600 to-purple-600 text-white shadow-lg shadow-cyan-500/20">
-            <Radio className="h-5 w-5 animate-pulse" />
+      <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-slate-800/80 px-3 sm:px-6 bg-slate-950/70 backdrop-blur-md z-30">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 via-indigo-600 to-purple-600 text-white shadow-lg shadow-cyan-500/20">
+            <Radio className="h-4 w-4 sm:h-5 sm:w-5 animate-pulse" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold text-white tracking-tight">Gemini Live</h1>
-              <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-400 border border-cyan-500/20">
-                Voice & Multimodal
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">Live Voice AI</h1>
+              <span className="rounded-full bg-cyan-500/10 px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold text-cyan-400 border border-cyan-500/20 whitespace-nowrap">
+                By Arif Hussain
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">Bidirectional real-time conversational AI</p>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate hidden xs:block">Real-time Conversational Voice & Vision</p>
           </div>
         </div>
 
         {/* Center Status Pill */}
-        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-800 bg-slate-900/60 text-xs">
+        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-800 bg-slate-900/60 text-xs">
           <span
             className={`h-2.5 w-2.5 rounded-full ${
               callStatus === 'active' || callStatus === 'speaking' || callStatus === 'listening'
@@ -641,7 +660,7 @@ export default function App() {
             {callStatus === 'idle' && 'Disconnected'}
             {callStatus === 'connecting' && 'Connecting...'}
             {callStatus === 'active' && 'Live In-Call'}
-            {callStatus === 'speaking' && 'Gemini Speaking'}
+            {callStatus === 'speaking' && 'AI Speaking'}
             {callStatus === 'listening' && 'Listening to You'}
             {callStatus === 'interrupted' && 'Interrupted'}
           </span>
@@ -653,29 +672,41 @@ export default function App() {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Mobile Transcript Toggle Button */}
+          <button
+            onClick={() => setShowMobileTranscript(true)}
+            className="flex md:hidden items-center gap-1 px-2 py-1.5 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-300 text-xs font-semibold"
+            title="View Live Transcript"
+          >
+            <MessageSquare className="h-3.5 w-3.5 text-cyan-400" />
+            <span className="text-[10px]">Chat</span>
+          </button>
+
           {/* Run Anywhere / Standalone Button */}
           <button
             onClick={() => setShowRunAnywhere(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-300 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-300 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10"
+            title="Deploy on Vercel or Custom Domain"
           >
-            <Globe className="h-4 w-4 text-emerald-400" />
-            <span>Use Anywhere</span>
+            <Globe className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-400" />
+            <span className="hidden sm:inline">Use Anywhere</span>
           </button>
 
           {/* Guide Modal Button */}
           <button
             onClick={() => setShowGuide(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/30 hover:bg-cyan-900/40 text-cyan-300 text-xs font-semibold transition-all shadow-sm"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/30 hover:bg-cyan-900/40 text-cyan-300 text-xs font-semibold transition-all shadow-sm"
+            title="How to use Live Voice"
           >
-            <HelpCircle className="h-4 w-4" />
-            <span className="hidden sm:inline">How to use Live</span>
+            <HelpCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Guide</span>
           </button>
 
           {/* Settings Button */}
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className={`p-2 rounded-lg border text-slate-300 hover:text-white transition-all ${
+            className={`p-1.5 sm:p-2 rounded-lg border text-slate-300 hover:text-white transition-all ${
               showSettings ? 'border-indigo-500 bg-indigo-950/40 text-white' : 'border-slate-800 bg-slate-900/60'
             }`}
             title="Voice & Model Settings"
@@ -877,129 +908,129 @@ export default function App() {
             )}
           </div>
 
-          {/* Bottom Live Call Controls Toolbar */}
-          <div className="flex flex-col items-center gap-4">
-            <div className="flex items-center gap-3 p-2 rounded-2xl border border-slate-800/90 bg-slate-900/80 backdrop-blur-md shadow-2xl">
-              {/* Mic Toggle */}
-              <button
-                onClick={toggleMic}
-                disabled={callStatus === 'idle'}
-                className={`p-3 rounded-xl border transition-all ${
-                  isMicMuted
-                    ? 'border-red-500/50 bg-red-950/40 text-red-400'
-                    : 'border-slate-700 bg-slate-800/80 text-white hover:bg-slate-700'
-                } disabled:opacity-40 disabled:cursor-not-allowed`}
-                title={isMicMuted ? 'Unmute Microphone' : 'Mute Microphone'}
-              >
-                {isMicMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-              </button>
-
-              {/* Camera Vision Toggle */}
-              <button
-                onClick={toggleVideo}
-                disabled={callStatus === 'idle'}
-                className={`p-3 rounded-xl border transition-all ${
-                  isVideoEnabled
-                    ? 'border-cyan-500 bg-cyan-950/40 text-cyan-400 shadow-md shadow-cyan-500/20'
-                    : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700'
-                } disabled:opacity-40 disabled:cursor-not-allowed`}
-                title="Toggle Webcam Vision (1 FPS)"
-              >
-                {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-              </button>
-
-              {/* Screen Share Vision Toggle */}
-              <button
-                onClick={toggleScreen}
-                disabled={callStatus === 'idle'}
-                className={`p-3 rounded-xl border transition-all ${
-                  isScreenEnabled
-                    ? 'border-indigo-500 bg-indigo-950/40 text-indigo-400 shadow-md shadow-indigo-500/20'
-                    : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700'
-                } disabled:opacity-40 disabled:cursor-not-allowed`}
-                title="Toggle Screen Sharing Vision (1 FPS)"
-              >
-                <Monitor className="h-5 w-5" />
-              </button>
-
-              {/* Main Call Start / End Button */}
-              {callStatus === 'idle' ? (
+            {/* Bottom Live Call Controls Toolbar */}
+            <div className="flex flex-col items-center gap-3 sm:gap-4 w-full">
+              <div className="flex items-center gap-1 sm:gap-2.5 p-1.5 sm:p-2 rounded-2xl border border-slate-800/90 bg-slate-900/80 backdrop-blur-md shadow-2xl max-w-full overflow-x-auto no-scrollbar justify-center">
+                {/* Mic Toggle */}
                 <button
-                  onClick={() => startCall(false)}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 text-white shadow-xl shadow-cyan-500/25 hover:brightness-110 active:scale-95 transition-all"
+                  onClick={toggleMic}
+                  disabled={callStatus === 'idle'}
+                  className={`p-2 sm:p-3 rounded-xl border transition-all ${
+                    isMicMuted
+                      ? 'border-red-500/50 bg-red-950/40 text-red-400'
+                      : 'border-slate-700 bg-slate-800/80 text-white hover:bg-slate-700'
+                  } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  title={isMicMuted ? 'Unmute Microphone' : 'Mute Microphone'}
                 >
-                  <PhoneCall className="h-5 w-5" />
-                  <span>Start Live Call</span>
+                  {isMicMuted ? <MicOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <Mic className="h-4 w-4 sm:h-5 sm:w-5" />}
                 </button>
-              ) : (
+
+                {/* Camera Vision Toggle */}
                 <button
-                  onClick={stopCall}
-                  className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm bg-red-600 hover:bg-red-500 text-white shadow-xl shadow-red-600/25 active:scale-95 transition-all"
+                  onClick={toggleVideo}
+                  disabled={callStatus === 'idle'}
+                  className={`p-2 sm:p-3 rounded-xl border transition-all ${
+                    isVideoEnabled
+                      ? 'border-cyan-500 bg-cyan-950/40 text-cyan-400 shadow-md shadow-cyan-500/20'
+                      : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+                  } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  title="Toggle Webcam Vision (1 FPS)"
                 >
-                  <PhoneOff className="h-5 w-5" />
-                  <span>End Call</span>
+                  {isVideoEnabled ? <Video className="h-4 w-4 sm:h-5 sm:w-5" /> : <VideoOff className="h-4 w-4 sm:h-5 sm:w-5" />}
                 </button>
-              )}
 
-              {/* Interrupt Button */}
-              <button
-                onClick={triggerInterrupt}
-                disabled={callStatus === 'idle'}
-                className="flex items-center gap-1.5 px-3.5 py-3 rounded-xl border border-amber-500/40 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 text-xs font-semibold disabled:opacity-40 transition-all"
-                title="Instantly stop Gemini playback"
-              >
-                <Zap className="h-4 w-4" />
-                <span className="hidden sm:inline">Interrupt</span>
-              </button>
+                {/* Screen Share Vision Toggle */}
+                <button
+                  onClick={toggleScreen}
+                  disabled={callStatus === 'idle'}
+                  className={`p-2 sm:p-3 rounded-xl border transition-all ${
+                    isScreenEnabled
+                      ? 'border-indigo-500 bg-indigo-950/40 text-indigo-400 shadow-md shadow-indigo-500/20'
+                      : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+                  } disabled:opacity-40 disabled:cursor-not-allowed hidden sm:flex`}
+                  title="Toggle Screen Sharing Vision (1 FPS)"
+                >
+                  <Monitor className="h-4 w-4 sm:h-5 sm:w-5" />
+                </button>
 
-              {/* Seamless Session Renew Button */}
-              <button
-                onClick={renewSession}
-                disabled={callStatus === 'idle'}
-                className="flex items-center gap-1.5 px-3 py-3 rounded-xl border border-indigo-500/40 bg-indigo-950/30 hover:bg-indigo-900/40 text-indigo-300 text-xs font-semibold disabled:opacity-40 transition-all"
-                title="Renew 5-minute session without hanging up"
-              >
-                <RefreshCw className="h-4 w-4" />
-                <span className="hidden sm:inline">Renew</span>
-              </button>
+                {/* Main Call Start / End Button */}
+                {callStatus === 'idle' ? (
+                  <button
+                    onClick={() => startCall(false)}
+                    className="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 text-white shadow-xl shadow-cyan-500/25 hover:brightness-110 active:scale-95 transition-all shrink-0"
+                  >
+                    <PhoneCall className="h-4 w-4 sm:h-5 sm:w-5" />
+                    <span>Start Live Call</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopCall}
+                    className="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm bg-red-600 hover:bg-red-500 text-white shadow-xl shadow-red-600/25 active:scale-95 transition-all shrink-0"
+                  >
+                    <PhoneOff className="h-4 w-4 sm:h-5 sm:w-5" />
+                    <span>End Call</span>
+                  </button>
+                )}
 
-              {/* Speaker Toggle */}
-              <button
-                onClick={toggleSpeaker}
-                className={`p-3 rounded-xl border transition-all ${
-                  isSpeakerMuted
-                    ? 'border-amber-500/50 bg-amber-950/40 text-amber-400'
-                    : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700'
-                }`}
-                title={isSpeakerMuted ? 'Unmute Audio Playback' : 'Mute Audio Playback'}
+                {/* Interrupt Button */}
+                <button
+                  onClick={triggerInterrupt}
+                  disabled={callStatus === 'idle'}
+                  className="flex items-center gap-1 px-2.5 sm:px-3.5 py-2 sm:py-3 rounded-xl border border-amber-500/40 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 text-xs font-semibold disabled:opacity-40 transition-all shrink-0"
+                  title="Instantly stop AI speech"
+                >
+                  <Zap className="h-4 w-4" />
+                  <span className="hidden sm:inline">Interrupt</span>
+                </button>
+
+                {/* Seamless Session Renew Button */}
+                <button
+                  onClick={renewSession}
+                  disabled={callStatus === 'idle'}
+                  className="flex items-center gap-1 px-2.5 sm:px-3 py-2 sm:py-3 rounded-xl border border-indigo-500/40 bg-indigo-950/30 hover:bg-indigo-900/40 text-indigo-300 text-xs font-semibold disabled:opacity-40 transition-all shrink-0"
+                  title="Renew 5-minute session without hanging up"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  <span className="hidden sm:inline">Renew</span>
+                </button>
+
+                {/* Speaker Toggle */}
+                <button
+                  onClick={toggleSpeaker}
+                  className={`p-2 sm:p-3 rounded-xl border transition-all ${
+                    isSpeakerMuted
+                      ? 'border-amber-500/50 bg-amber-950/40 text-amber-400'
+                      : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+                  }`}
+                  title={isSpeakerMuted ? 'Unmute Audio Playback' : 'Mute Audio Playback'}
+                >
+                  {isSpeakerMuted ? <VolumeX className="h-4 w-4 sm:h-5 sm:w-5" /> : <Volume2 className="h-4 w-4 sm:h-5 sm:w-5" />}
+                </button>
+              </div>
+
+              {/* In-Call Text Input Bar */}
+              <form
+                onSubmit={handleSendTypedMessage}
+                className="w-full max-w-xl flex items-center gap-1.5 sm:gap-2 bg-slate-900/70 border border-slate-800 rounded-xl p-1.5 pl-2.5 sm:pl-3 focus-within:border-cyan-500"
               >
-                {isSpeakerMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-              </button>
+                <input
+                  type="text"
+                  value={typedMessage}
+                  onChange={(e) => setTypedMessage(e.target.value)}
+                  placeholder="Or type a message directly into the live conversation..."
+                  className="flex-1 bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={!typedMessage.trim()}
+                  className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold transition-all flex items-center gap-1 shrink-0"
+                >
+                  <Send className="h-3 w-3" />
+                  <span className="hidden xs:inline">Send</span>
+                </button>
+              </form>
             </div>
-
-            {/* In-Call Text Input Bar */}
-            <form
-              onSubmit={handleSendTypedMessage}
-              className="w-full max-w-xl flex items-center gap-2 bg-slate-900/70 border border-slate-800 rounded-xl p-1.5 pl-3 focus-within:border-cyan-500"
-            >
-              <input
-                type="text"
-                value={typedMessage}
-                onChange={(e) => setTypedMessage(e.target.value)}
-                placeholder="Or type a message directly into the live conversation..."
-                className="flex-1 bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none"
-              />
-              <button
-                type="submit"
-                disabled={!typedMessage.trim()}
-                className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold transition-all flex items-center gap-1"
-              >
-                <Send className="h-3 w-3" />
-                <span>Send</span>
-              </button>
-            </form>
           </div>
-        </div>
 
         {/* Right Side: Live Transcript View */}
         <div className="w-80 lg:w-96 border-l border-slate-800/80 bg-slate-950/40 flex flex-col p-4 shrink-0 hidden md:flex">
@@ -1032,7 +1063,7 @@ export default function App() {
               {/* Model Choice */}
               <div>
                 <label className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-2">
-                  Gemini Live Model
+                  Live Voice AI Model
                 </label>
                 <div className="grid grid-cols-1 gap-2">
                   <button
@@ -1205,7 +1236,7 @@ export default function App() {
                     ))}
                   </div>
                   <p className="text-[10px] text-slate-400 leading-tight">
-                    কথা শেষ করার পর জেমিনি ঠিক <strong>{silenceWait} সেকেন্ড</strong> অপেক্ষা করবে। আপনি আর কিছু না বললে সঙ্গে সঙ্গে জেমিনি উত্তর দেওয়া শুরু করবে।
+                    কথা শেষ করার পর AI শিক্ষক ঠিক <strong>{silenceWait} সেকেন্ড</strong> অপেক্ষা করবেন। আপনি আর কিছু না বললে সঙ্গে সঙ্গে উত্তর দেওয়া শুরু করবেন।
                   </p>
                 </div>
               </div>
@@ -1262,6 +1293,28 @@ export default function App() {
             : 'https://ais-pre-rhyd6xypf3o733gk6gjlaz-761573247142.asia-northeast1.run.app'
         }
       />
+
+      {/* Mobile Transcript Modal */}
+      {showMobileTranscript && (
+        <div className="fixed inset-0 z-50 flex flex-col md:hidden bg-slate-950/95 backdrop-blur-md p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <h3 className="font-bold text-white text-sm">Live Dialogue Transcript</h3>
+            <button
+              onClick={() => setShowMobileTranscript(false)}
+              className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden pt-3">
+            <TranscriptView
+              items={transcripts}
+              onClear={() => setTranscripts([])}
+              voiceName={voice}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

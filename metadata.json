@@ -1,6 +1,6 @@
 {
-  "name": "Gemini Live Voice & Multimodal",
-  "description": "Real-time conversational AI powered by Gemini Live: bidirectional low-latency voice, live audio transcription, video streaming, and smart tools.",
+  "name": "Live Voice AI - By Arif Hussain",
+  "description": "Real-time conversational AI voice and multimodal assistance created by Arif Hussain.",
   "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
