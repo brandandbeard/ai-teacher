@@ -32,7 +32,6 @@ import { LiveAudioPlayer, LiveAudioRecorder } from './utils/audio.ts';
 import { AudioOrb } from './components/AudioOrb.tsx';
 import { VoiceSelector, VOICES } from './components/VoiceSelector.tsx';
 import { TranscriptView, TranscriptItem } from './components/TranscriptView.tsx';
-import { RunAnywhereModal } from './components/RunAnywhereModal.tsx';
 import { getSavedBackendHost, cleanBackendHost, getWsUrl } from './utils/backendConfig.ts';
 import {
   SHREYA_MAAM_PROMPT,
@@ -46,7 +45,6 @@ import {
   WBBSE_SCIENCE_PROMPT,
   WBBSE_GEOGRAPHY_PROMPT,
 } from './data/teacherPersonas.ts';
-import { Globe } from 'lucide-react';
 
 type CallStatus = 'idle' | 'connecting' | 'active' | 'speaking' | 'listening' | 'interrupted';
 
@@ -75,7 +73,6 @@ export default function App() {
   const [callDuration, setCallDuration] = useState(0);
   const [chunksReceived, setChunksReceived] = useState(0);
   const [statusMessage, setStatusMessage] = useState('Ready to connect');
-  const [showRunAnywhere, setShowRunAnywhere] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showMobileTranscript, setShowMobileTranscript] = useState(false);
   const [typedMessage, setTypedMessage] = useState('');
@@ -685,16 +682,6 @@ export default function App() {
             <span className="text-[10px]">Chat</span>
           </button>
 
-          {/* Run Anywhere / Standalone Button */}
-          <button
-            onClick={() => setShowRunAnywhere(true)}
-            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-300 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10"
-            title="Deploy on Vercel or Custom Domain"
-          >
-            <Globe className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-400" />
-            <span className="hidden sm:inline">Use Anywhere</span>
-          </button>
-
           {/* Settings Button */}
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -1301,13 +1288,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {/* Run Anywhere & Export Modal */}
-      <RunAnywhereModal
-        isOpen={showRunAnywhere}
-        onClose={() => setShowRunAnywhere(false)}
-        sharedAppUrl={typeof window !== 'undefined' ? window.location.origin : ''}
-      />
 
       {/* Mobile Transcript Modal */}
       {showMobileTranscript && (
