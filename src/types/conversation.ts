@@ -13,25 +13,34 @@ export type ConversationState =
   | 'RECONNECTING'       // Transport/session is reconnecting without restarting lesson
   | 'ERROR';             // Unrecoverable error has occurred
 
+export type TeachingMode = 'lecture' | 'doubts' | 'quiz';
+
 export interface TeachingContextSummary {
   personaId: string;
   personaTitle: string;
   className?: string;           // e.g. "Class 10"
-  subject?: string;             // e.g. "Physical Science" or "Life Science"
-  chapter?: string;             // e.g. "Chapter 2 - গ্যাসের আচরণ"
-  currentTopic?: string;        // e.g. "চার্লসের সূত্র (Charles's Law)"
+  classGrade?: string;          // Alias for className
+  subject?: string;             // e.g. "WBBSE Science", "Physical Science", "Life Science"
+  chapter?: string;             // e.g. "অধ্যায় ২"
+  currentTopic: string | null;  // e.g. "Boyle's Law & Gas Behavior"
+  teachingMode?: TeachingMode;  // 'lecture' (আলোচনা) | 'doubts' (AI কে প্রশ্ন) | 'quiz' (প্রশ্ন উত্তর)
+  teachingModeLabel?: string;   // 'আলোচনা' | 'AI কে প্রশ্ন' | 'প্রশ্ন উত্তর'
   lastCompletedConcept?: string;// e.g. "বয়েলের সূত্র ও গাণিতিক রূপ"
-  conceptsCovered: string[];    // e.g. ["বয়েলের সূত্র", "P1V1=P2V2"]
+  conceptsCovered: string[];    // e.g. ["Boyle's Law", "Charles's Law"]
+  topicHistory: string[];       // All topics visited during this lesson
   pendingQuestion?: string;     // Last question teacher asked before waiting
+  popQuizPending: boolean;      // Whether teacher asked a checkpoint question
   lastStudentInput?: string;    // Last recognized student transcript/message
   conversationState: ConversationState;
   turnCount: number;
+  turnsCompleted: number;       // Alias for turnCount
   isLessonStarted: boolean;
   resumptionCount: number;
+  resumptionHandle: string | null;
   lastUpdated: number;
 }
 
-export type StudentIntent =
+export type StudentIntentType =
   | 'TOPIC_REQUEST'      // e.g., "Class 10 Physical Science Chapter 2 Boyle's law"
   | 'TOPIC_SWITCH'       // e.g., "এবার চার্লসের সূত্র বোঝাও" or "এবার জীবনবিজ্ঞান পড়াও"
   | 'REPEAT_EXPLANATION' // e.g., "আগের বিষয়টা আরেকবার বুঝিয়ে দাও"
@@ -39,3 +48,8 @@ export type StudentIntent =
   | 'QUESTION'           // e.g., student asks a question during lesson
   | 'START_NEW_LESSON'   // e.g., "আজ নতুন করে পড়া শুরু করি"
   | 'UNKNOWN';
+
+export type StudentIntent = StudentIntentType | {
+  type: StudentIntentType;
+  extractedTopic?: string;
+};

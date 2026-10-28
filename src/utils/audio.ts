@@ -12,9 +12,17 @@ export class LiveAudioPlayer {
   private activeSources: AudioBufferSourceNode[] = [];
   private isMuted = false;
   private playbackRate = 1.0;
+  private lastChunkTime = 0;
 
   constructor() {
     // Lazily initialized on user gesture
+  }
+
+  public isPlaying(): boolean {
+    if (!this.ctx) return false;
+    const isBufferPlaying = this.activeSources.length > 0 && this.nextStartTime > this.ctx.currentTime;
+    const isRecentChunk = Date.now() - this.lastChunkTime < 650;
+    return isBufferPlaying || isRecentChunk;
   }
 
   public setPlaybackRate(rate: number) {
@@ -51,6 +59,7 @@ export class LiveAudioPlayer {
   public playChunk(base64Pcm: string) {
     this.init();
     if (!this.ctx || !this.analyser || this.isMuted) return;
+    this.lastChunkTime = Date.now();
 
     try {
       const binary = atob(base64Pcm);
@@ -98,6 +107,7 @@ export class LiveAudioPlayer {
   }
 
   public stopAndClear() {
+    this.lastChunkTime = 0;
     this.activeSources.forEach((s) => {
       try {
         s.stop();
@@ -146,6 +156,7 @@ export class LiveAudioRecorder {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
+  private filter: BiquadFilterNode | null = null;
   private processor: ScriptProcessorNode | null = null;
   private analyser: AnalyserNode | null = null;
   private onDataCallback: ((base64Pcm: string) => void) | null = null;
@@ -156,16 +167,40 @@ export class LiveAudioRecorder {
 
   // Adaptive Voice Activity Detection parameters
   private vadEnabled = true;
-  private sensitivityLevel = 75; // Wide range: 10 (low / noisy) to 100 (ultra sensitive)
+  private sensitivityLevel = 35; // 0 (Full Noise / Maximum suppression) to 100 (No Noise / Delicate sensitivity)
   private silenceWaitMs = 1250; // User-requested silence threshold: exactly 1.25s
   private noiseFloor = 0.007; // Dynamic background noise floor
   private isUserSpeaking = false;
   private lastSpeechTime = 0;
   private consecutiveSpeechFrames = 0;
-  private preRollBuffer: string[] = []; // Circular buffer of last 2 frames (~250ms) before speech to prevent clipping the first syllable
+  private preRollBuffer: string[] = []; // Circular buffer of last 2 frames (~250ms) before speech
+
+  // Acoustic Echo Shield & Anti-Interruption Guard
+  private isAiSpeakingCallback: (() => boolean) | null = null;
+  private echoGuardEnabled = true;
 
   public isRecording(): boolean {
     return Boolean(this.stream && this.stream.active && this.processor);
+  }
+
+  public isSpeaking(): boolean {
+    return this.isUserSpeaking;
+  }
+
+  public getNoiseFloor(): number {
+    return this.noiseFloor;
+  }
+
+  public setAiSpeakingCallback(cb: () => boolean) {
+    this.isAiSpeakingCallback = cb;
+  }
+
+  public setEchoGuardEnabled(enabled: boolean) {
+    this.echoGuardEnabled = enabled;
+  }
+
+  public isEchoGuardEnabled(): boolean {
+    return this.echoGuardEnabled;
   }
 
   public setVadEnabled(enabled: boolean) {
@@ -177,7 +212,8 @@ export class LiveAudioRecorder {
   }
 
   public setSensitivity(level: number) {
-    this.sensitivityLevel = Math.max(10, Math.min(100, level));
+    // Clamped strictly between 0 and 100
+    this.sensitivityLevel = Math.max(0, Math.min(100, Math.round(level)));
   }
 
   public getSensitivity(): number {
@@ -193,7 +229,6 @@ export class LiveAudioRecorder {
   }
 
   public setVadThreshold(threshold: number) {
-    // Maps legacy threshold calls (0.009 - 0.030) to sensitivity percentage (10 - 100)
     const level = Math.round(100 - ((threshold - 0.008) / 0.022) * 80);
     this.setSensitivity(level);
   }
@@ -259,12 +294,21 @@ export class LiveAudioRecorder {
     });
 
     this.source = this.ctx.createMediaStreamSource(this.stream);
+
+    // 120Hz highpass filter to strip fan rumble, room hum, and mechanical vibrations
+    this.filter = this.ctx.createBiquadFilter();
+    this.filter.type = 'highpass';
+    this.filter.frequency.value = 120;
+    this.filter.Q.value = 0.7;
+
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 256;
-    this.source.connect(this.analyser);
 
     // Buffer size of 2048 gives ~128ms frames at 16kHz for lightning-fast voice detection
     this.processor = this.ctx.createScriptProcessor(2048, 1, 1);
+
+    this.source.connect(this.filter);
+    this.filter.connect(this.analyser);
     this.analyser.connect(this.processor);
     this.processor.connect(this.ctx.destination);
 
@@ -286,19 +330,38 @@ export class LiveAudioRecorder {
 
       // 2. Adaptive noise floor calculation (when user is not speaking)
       if (!this.isUserSpeaking) {
-        this.noiseFloor = this.noiseFloor * 0.92 + rms * 0.08;
+        this.noiseFloor = this.noiseFloor * 0.94 + rms * 0.06;
       }
 
       // 3. Dynamic Threshold derived from user sensitivity:
-      // High sensitivity (75-95%): threshold is close to noise floor (~noiseFloor + 0.005)
-      // Low sensitivity (15-35%): threshold requires strong voice (~noiseFloor + 0.025)
-      const sensitivityFactor = (105 - this.sensitivityLevel) / 100; // 0.05 to 0.95
-      const speechOnsetThreshold = Math.max(0.009, this.noiseFloor * 1.25 + sensitivityFactor * 0.022);
-      const speechSustainThreshold = Math.max(0.006, this.noiseFloor * 1.1 + sensitivityFactor * 0.014);
+      // norm: 0.0 = 0% (Full Noise - maximum suppression), 1.0 = 100% (No Noise - delicate quiet room)
+      const norm = Math.max(0, Math.min(100, this.sensitivityLevel)) / 100;
 
+      // Base RMS onset: at 0% (Full Noise) = 0.070, at 50% = 0.038, at 100% (No Noise) = 0.012
+      const baseOnsetRms = 0.070 - norm * 0.058;
+      // Noise floor multiplier: at 0% = 2.0x, at 100% = 1.25x
+      const noiseMultiplier = 2.0 - norm * 0.75;
+      // Peak onset: at 0% = 0.22, at 50% = 0.15, at 100% = 0.08
+      const basePeakOnset = 0.22 - norm * 0.14;
+
+      // 4. Acoustic Echo Shield:
+      // If AI is currently outputting voice through the speaker, raise the barrier so the AI's own audio
+      // doesn't loop back into the microphone and falsely interrupt itself!
+      const isAiSpeaking = this.echoGuardEnabled && (this.isAiSpeakingCallback ? this.isAiSpeakingCallback() : false);
+      const echoShieldRms = isAiSpeaking ? 2.5 : 1.0;
+      const echoShieldPeak = isAiSpeaking ? 1.6 : 1.0;
+
+      const speechOnsetThreshold = Math.max(baseOnsetRms * echoShieldRms, this.noiseFloor * noiseMultiplier * echoShieldRms);
+      const speechPeakThreshold = Math.max(basePeakOnset * echoShieldPeak, this.noiseFloor * 2.8 * echoShieldPeak);
+
+      const speechSustainThreshold = speechOnsetThreshold * 0.65;
+      const speechSustainPeak = speechPeakThreshold * 0.70;
+
+      // When starting to speak, REQUIRE BOTH RMS energy AND peak amplitude:
+      // (This completely eliminates false triggers from fan hiss or brief acoustic clicks)
       const isCurrentFrameVoice = this.isUserSpeaking
-        ? (rms >= speechSustainThreshold || peak >= 0.06)
-        : (rms >= speechOnsetThreshold || peak >= 0.08);
+        ? (rms >= speechSustainThreshold || peak >= speechSustainPeak)
+        : (rms >= speechOnsetThreshold && peak >= speechPeakThreshold);
 
       const base64Chunk = this.float32ToPcm16Base64(inputBuffer);
 
@@ -306,13 +369,16 @@ export class LiveAudioRecorder {
         this.consecutiveSpeechFrames++;
         this.lastSpeechTime = now;
 
-        // Trigger speech onset if 2 consecutive frames or clear speech peak
-        if (!this.isUserSpeaking && (this.consecutiveSpeechFrames >= 2 || peak >= 0.12)) {
+        // Require 3 consecutive frames (~384ms) in noisy environments or during AI speech,
+        // or 2 frames (~256ms) in very quiet rooms
+        const requiredFrames = (norm > 0.6 && !isAiSpeaking) ? 2 : 3;
+
+        if (!this.isUserSpeaking && (this.consecutiveSpeechFrames >= requiredFrames || peak >= 0.28)) {
           this.isUserSpeaking = true;
           if (this.onSpeechStateChange) {
             this.onSpeechStateChange(true);
           }
-          // Flush pre-roll buffer so the very beginning of the first word isn't lost
+          // Flush pre-roll buffer so the first syllable isn't lost
           if (this.onDataCallback) {
             for (const preChunk of this.preRollBuffer) {
               this.onDataCallback(preChunk);
@@ -321,7 +387,7 @@ export class LiveAudioRecorder {
           this.preRollBuffer = [];
         }
 
-        // Send active voice frame
+        // Send active voice frame only when user is genuinely speaking
         if (this.isUserSpeaking && this.onDataCallback) {
           this.onDataCallback(base64Chunk);
         }
@@ -337,7 +403,7 @@ export class LiveAudioRecorder {
               this.onDataCallback(base64Chunk);
             }
           } else {
-            // Exactly 1.25s silence reached: user has finished speaking!
+            // Silence window reached: user has finished speaking!
             this.isUserSpeaking = false;
             if (this.onSpeechStateChange) {
               this.onSpeechStateChange(false);
@@ -409,6 +475,12 @@ export class LiveAudioRecorder {
         this.processor.disconnect();
       } catch (e) {}
       this.processor = null;
+    }
+    if (this.filter) {
+      try {
+        this.filter.disconnect();
+      } catch (e) {}
+      this.filter = null;
     }
     if (this.source) {
       try {

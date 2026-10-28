@@ -135,6 +135,8 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
 
     // Audio buffer to queue client speech during brief server reconnection transitions (~200ms)
     const pendingAudioQueue: string[] = [];
+    // Text buffer to queue student text messages while session is initializing or reconnecting
+    const pendingTextQueue: string[] = [];
 
     // Heartbeat keep-alive every 10s to prevent proxy/Cloud Run idle timeouts
     const heartbeatInterval = setInterval(() => {
@@ -420,6 +422,26 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
           }
         }
 
+        // Flush any pending text messages queued during connection
+        while (pendingTextQueue.length > 0) {
+          const queuedText = pendingTextQueue.shift();
+          if (queuedText && liveSession) {
+            try {
+              liveSession.sendClientContent({
+                turns: [
+                  {
+                    role: "user",
+                    parts: [{ text: queuedText }],
+                  },
+                ],
+                turnComplete: true,
+              });
+            } catch (e) {
+              console.error("[LiveGateway] Error sending queued text:", e);
+            }
+          }
+        }
+
         clientWs.send(
           JSON.stringify({
             type: "status",
@@ -564,18 +586,38 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
           return;
         }
 
-        // Direct text input injected into live conversation
+        // Direct text input injected into live conversation (acts like speech)
         if (message.type === "text" && message.text) {
           if (liveSession && isConnected) {
-            liveSession.sendClientContent({
-              turns: [
-                {
-                  role: "user",
-                  parts: [{ text: message.text }],
-                },
-              ],
-              turnComplete: true,
-            });
+            try {
+              liveSession.sendClientContent({
+                turns: [
+                  {
+                    role: "user",
+                    parts: [{ text: message.text }],
+                  },
+                ],
+                turnComplete: true,
+              });
+            } catch (err: any) {
+              console.error("[LiveGateway] Failed to send client text content:", err);
+              clientWs.send(
+                JSON.stringify({
+                  type: "error",
+                  message: `AI-তে মেসেজ পৌঁছায়নি: ${err?.message || "Error"}. আবার চেষ্টা করুন।`,
+                })
+              );
+            }
+          } else {
+            console.log("[LiveGateway] Queuing text message until session connects:", message.text);
+            pendingTextQueue.push(message.text);
+            clientWs.send(
+              JSON.stringify({
+                type: "status",
+                status: "connecting",
+                message: "সংযোগ তৈরি হচ্ছে, এক মুহূর্তেই AI উত্তর দেবে...",
+              })
+            );
           }
           return;
         }

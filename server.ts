@@ -10,27 +10,42 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-const port = parseInt(process.env.PORT || "3000", 10);
-const httpServer = http.createServer(app);
+async function startServer() {
+  const app = express();
+  const port = parseInt(process.env.PORT || "3000", 10);
+  const httpServer = http.createServer(app);
 
-// Attach Gemini Live WebSocket and API endpoints
-attachLiveServer(httpServer, app);
+  // Attach Gemini Live WebSocket and API endpoints
+  attachLiveServer(httpServer, app);
 
-// Ensure Node HTTP server doesn't prematurely drop long-running WebSocket connections
-httpServer.keepAliveTimeout = 650000;
-httpServer.headersTimeout = 660000;
-httpServer.timeout = 0;
+  // Ensure Node HTTP server doesn't prematurely drop long-running WebSocket connections
+  httpServer.keepAliveTimeout = 650000;
+  httpServer.headersTimeout = 660000;
+  httpServer.timeout = 0;
 
-// Serve static build files
-const distPath = path.resolve(__dirname, "dist");
-app.use(express.static(distPath));
+  const isProduction = process.env.NODE_ENV === "production";
 
-// Fallback to index.html for SPA routing
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(distPath, "index.html"));
-});
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    // Serve static build files in production
+    const distPath = path.resolve(__dirname, "dist");
+    app.use(express.static(distPath));
 
-httpServer.listen(port, "0.0.0.0", () => {
-  console.log(`Server listening on http://0.0.0.0:${port}`);
-});
+    // Fallback to index.html for SPA routing
+    app.get("*", (_req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  httpServer.listen(port, "0.0.0.0", () => {
+    console.log(`Server listening on http://0.0.0.0:${port}`);
+  });
+}
+
+startServer();

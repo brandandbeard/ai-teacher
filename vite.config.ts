@@ -1,24 +1,12 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig, Plugin } from 'vite';
-import { attachLiveServer } from './server/live-service.ts';
-
-function geminiLivePlugin(): Plugin {
-  return {
-    name: 'gemini-live-plugin',
-    configureServer(server) {
-      if (server.httpServer) {
-        attachLiveServer(server.httpServer, server.middlewares);
-      }
-    },
-  };
-}
+import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
     base: './',
-    plugins: [react(), tailwindcss(), geminiLivePlugin()],
+    plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

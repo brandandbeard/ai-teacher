@@ -33,6 +33,8 @@ import { AudioOrb } from './components/AudioOrb.tsx';
 import { VoiceSelector, VOICES } from './components/VoiceSelector.tsx';
 import { TranscriptView, TranscriptItem } from './components/TranscriptView.tsx';
 import { getSavedBackendHost, cleanBackendHost, getWsUrl } from './utils/backendConfig.ts';
+import { conversationStateMachine } from './utils/conversationStateMachine.ts';
+import type { TeachingContextSummary, ConversationState, TeachingMode } from './types/conversation.ts';
 import {
   NON_STOP_TEACHING_SYSTEM_RULE,
   SHREYA_MAAM_PROMPT,
@@ -57,6 +59,25 @@ export default function App() {
   const [systemInstruction, setSystemInstruction] = useState<string>(SHREYA_MAAM_PROMPT);
   const [backendHost] = useState<string>(() => getSavedBackendHost());
 
+  // Conversation State Machine & Active Topic Context
+  const [activeContext, setActiveContext] = useState<TeachingContextSummary>(() => conversationStateMachine.getContext());
+  const [convState, setConvState] = useState<ConversationState>(() => conversationStateMachine.getState());
+
+  // Interactive Class & Mode Selection ("আলোচনা", "AI কে প্রশ্ন", "প্রশ্ন উত্তর")
+  const [selectedClass, setSelectedClass] = useState<string>('Class 10');
+  const [selectedWbbseSubject, setSelectedWbbseSubject] = useState<'science' | 'history' | 'geography'>('science');
+  const [selectedCompetitiveSubject, setSelectedCompetitiveSubject] = useState<string>('Spoken English');
+  const [activeSection, setActiveSection] = useState<'wbbse' | 'competitive'>('wbbse');
+  const [teachingMode, setTeachingModeState] = useState<TeachingMode>('lecture');
+
+  useEffect(() => {
+    const unsubscribe = conversationStateMachine.subscribe((context, state) => {
+      setActiveContext({ ...context });
+      setConvState(state);
+    });
+    return unsubscribe;
+  }, []);
+
   // Audio & Video State
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
@@ -67,7 +88,8 @@ export default function App() {
 
   // Speed & Sensitivity Controls
   const [speechSpeed, setSpeechSpeed] = useState<number>(1.0);
-  const [micSensitivity, setMicSensitivity] = useState<number>(60); // Balanced by default (60%)
+  const [micSensitivity, setMicSensitivity] = useState<number>(30); // 0% (Full Noise / fan suppression) to 100% (No Noise / quiet room) - default 30%
+  const [echoShieldEnabled, setEchoShieldEnabled] = useState<boolean>(true); // Acoustic Echo Shield to prevent AI self-interruption
   const [silenceWait, setSilenceWait] = useState<number>(1.25); // Silence pause wait time in seconds (Default 1.25s)
 
   // Telemetry & UI
@@ -107,6 +129,11 @@ export default function App() {
     audioRecorderRef.current?.setSensitivity(micSensitivity);
   }, [micSensitivity]);
 
+  // Sync echo shield dynamically
+  useEffect(() => {
+    audioRecorderRef.current?.setEchoGuardEnabled(echoShieldEnabled);
+  }, [echoShieldEnabled]);
+
   // Sync silence wait timeout dynamically
   useEffect(() => {
     audioRecorderRef.current?.setSilenceWaitMs(Math.round(silenceWait * 1000));
@@ -119,6 +146,10 @@ export default function App() {
     audioRecorderRef.current = new LiveAudioRecorder();
     audioRecorderRef.current.setSensitivity(micSensitivity);
     audioRecorderRef.current.setSilenceWaitMs(Math.round(silenceWait * 1000));
+    audioRecorderRef.current.setEchoGuardEnabled(echoShieldEnabled);
+    audioRecorderRef.current.setAiSpeakingCallback(() => {
+      return audioPlayerRef.current?.isPlaying() || false;
+    });
 
     return () => {
       stopCall();
@@ -162,15 +193,15 @@ export default function App() {
     }
   }, []);
 
-  // Arm 22s silence auto-disconnect timer (saves quota if student sleeps/leaves)
-  const armInactivityTimer = useCallback((delayMs = 22000) => {
+  // Arm inactivity auto-disconnect timer (5 minutes safeguard so mute/typing students never get cut off)
+  const armInactivityTimer = useCallback((delayMs = 300000) => {
     clearInactivityTimer();
     inactivityTimeoutRef.current = window.setTimeout(() => {
       if (callStatusRef.current !== 'idle') {
         stopCall();
-        setStatusMessage('কোনো সাড়া না পাওয়ায় কল বিচ্ছিন্ন হয়েছে');
-        setErrorMessage('ছাত্রের কোনো সাড়া না পাওয়ায় AI কোটা সংরক্ষণের জন্য কলটি স্বয়ংক্রিয়ভাবে ডিসকানেক্ট করা হয়েছে।');
-        addTranscript('system', 'ছাত্র কোনো উত্তর না দেওয়ায় AI কোটা অপচয় রোধ করতে কলটি স্বয়ংক্রিয়ভাবে ডিসকানেক্ট করা হলো।');
+        setStatusMessage('দীর্ঘক্ষণ সাড়া না পাওয়ায় কল বিচ্ছিন্ন হয়েছে');
+        setErrorMessage('ছাত্রের দীর্ঘক্ষণ কোনো সাড়া না পাওয়ায় AI কোটা সংরক্ষণের জন্য কলটি ডিসকানেক্ট করা হয়েছে।');
+        addTranscript('system', 'দীর্ঘক্ষণ কোনো কথোপকথন না হওয়ায় কলটি স্বয়ংক্রিয়ভাবে ডিসকানেক্ট করা হলো।');
       }
     }, delayMs);
   }, [clearInactivityTimer]);
@@ -184,6 +215,17 @@ export default function App() {
 
   // Start Call Handler
   const startCall = async (isAutoRenew = false) => {
+    if (isAutoRenew && !conversationStateMachine.acquireReconnectLock()) {
+      console.log('[App] Reconnect already in progress, avoiding duplicate connect');
+      return;
+    }
+
+    // CRITICAL: When user initiates a fresh call, discard old session resume token so the selected subject/persona starts clean!
+    if (!isAutoRenew) {
+      lastResumptionHandleRef.current = null;
+      conversationStateMachine.setResumptionHandle(null);
+    }
+
     setErrorMessage(null);
     setCallStatus(isAutoRenew ? 'active' : 'connecting');
     setStatusMessage(isAutoRenew ? 'Refreshing connection...' : 'Initiating audio session & WebSocket...');
@@ -221,6 +263,7 @@ export default function App() {
       }
 
       if (!wsHost) {
+        conversationStateMachine.releaseReconnectLock();
         setCallStatus('idle');
         setStatusMessage('Backend connecting...');
         setErrorMessage('লাইভ ভয়েস ব্যাকএন্ডের সাথে সংযোগ স্থাপন করা যাচ্ছে না। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।');
@@ -240,18 +283,25 @@ export default function App() {
         const speedInstruction = speechSpeed !== 1.0
           ? `\nSpeaking Pace: Please speak at an overall ${speechSpeed > 1.0 ? 'slightly brisk' : 'relaxed/slower'} speaking pace (${speechSpeed}x speed).`
           : '';
-        const effectiveInstruction = systemInstruction.includes('NON-STOP CONTINUOUS TEACHING')
-          ? systemInstruction + speedInstruction
-          : `${systemInstruction}\n\n${NON_STOP_TEACHING_SYSTEM_RULE}${speedInstruction}`;
+        const durableInstruction = conversationStateMachine.generateDurableContextInstruction();
+        const baseRule = systemInstruction.includes('NON-STOP CONTINUOUS TEACHING')
+          ? systemInstruction
+          : `${systemInstruction}\n\n${NON_STOP_TEACHING_SYSTEM_RULE}`;
+        const effectiveInstruction = `${baseRule}${speedInstruction}${durableInstruction ? `\n\n${durableInstruction}` : ''}`;
 
-        // Dispatch session start config with resumption token if available
+        // Dispatch session start config: resume token is ONLY sent during seamless auto-renewal!
+        const effectiveResumeToken = isAutoRenew
+          ? (lastResumptionHandleRef.current || conversationStateMachine.getResumptionHandle() || undefined)
+          : undefined;
+
         ws.send(
           JSON.stringify({
             type: 'start',
             model,
             voice,
             systemInstruction: effectiveInstruction,
-            resumeHandle: lastResumptionHandleRef.current || undefined,
+            resumeHandle: effectiveResumeToken,
+            contextSummary: conversationStateMachine.getContext(),
           })
         );
       };
@@ -266,6 +316,7 @@ export default function App() {
 
           if (msg.type === 'resumption_update' && msg.handle) {
             lastResumptionHandleRef.current = msg.handle;
+            conversationStateMachine.setResumptionHandle(msg.handle);
             return;
           }
 
@@ -277,6 +328,7 @@ export default function App() {
           if (msg.type === 'session_timeout') {
             if (msg.handle) {
               lastResumptionHandleRef.current = msg.handle;
+              conversationStateMachine.setResumptionHandle(msg.handle);
             }
             setStatusMessage('Session cycle completed. Resuming conversation...');
             renewSession();
@@ -290,10 +342,13 @@ export default function App() {
             }
 
             if (msg.status === 'active') {
+              conversationStateMachine.releaseReconnectLock();
+              conversationStateMachine.transitionTo('READY');
               setCallStatus('active');
               setStatusMessage('Live conversation active. Speak freely!');
               if (msg.resumptionHandle) {
                 lastResumptionHandleRef.current = msg.resumptionHandle;
+                conversationStateMachine.setResumptionHandle(msg.resumptionHandle);
               }
               if (!isAutoRenew) {
                 addTranscript('system', `Connected to ${model} with voice '${voice}'`);
@@ -334,13 +389,21 @@ export default function App() {
 
           if (msg.type === 'audio' && msg.data) {
             clearInactivityTimer();
+            conversationStateMachine.transitionTo('TEACHING');
             setChunksReceived((c) => c + 1);
             audioPlayerRef.current?.playChunk(msg.data);
           }
 
           if (msg.type === 'model_transcript' && msg.text) {
-            // Append model speech transcript
+            // Append model speech transcript and update state machine
             addTranscript('gemini', msg.text);
+            conversationStateMachine.processModelOutput(msg.text);
+          }
+
+          if (msg.type === 'user_transcript' && msg.text) {
+            // Student audio transcription from Gemini Live
+            addTranscript('user', msg.text);
+            conversationStateMachine.processStudentInput(msg.text);
           }
 
           if (msg.type === 'tool_call') {
@@ -356,19 +419,28 @@ export default function App() {
           if (msg.type === 'interrupted') {
             clearInactivityTimer();
             audioPlayerRef.current?.stopAndClear();
+            conversationStateMachine.transitionTo('PROCESSING_INPUT');
             setCallStatus('interrupted');
-            setStatusMessage('Interrupted. AI stopped speaking.');
-            addTranscript('system', 'AI interrupted by user');
+            setStatusMessage('Interrupted. Listening to you...');
+            if (audioRecorderRef.current?.isSpeaking()) {
+              addTranscript('system', 'AI interrupted by user');
+            }
             setTimeout(() => setCallStatus('active'), 1200);
           }
 
           if (msg.type === 'turn_complete') {
-            // Model finished speaking turn
-            setStatusMessage('Listening to you...');
-            armInactivityTimer(22000); // Auto-disconnect if 22s silent after question
+            const isWaiting = conversationStateMachine.isWaitingForStudent();
+            if (isWaiting) {
+              conversationStateMachine.transitionTo('WAITING_FOR_STUDENT');
+              setStatusMessage('শিক্ষক উত্তরের অপেক্ষায় আছেন (কথা বলুন বা নিচে চ্যাটে লিখুন)...');
+            } else {
+              setStatusMessage('পাঠদান চলছে (কথা বলুন, চ্যাটে লিখুন বা Next চাপুন)...');
+            }
+            armInactivityTimer(300000); // 5-minute inactivity safeguard
           }
 
           if (msg.type === 'error') {
+            conversationStateMachine.releaseReconnectLock();
             setErrorMessage(msg.message);
             setStatusMessage('Error encountered.');
             addTranscript('system', `Error: ${msg.message}`);
@@ -379,11 +451,13 @@ export default function App() {
       };
 
       ws.onerror = (err) => {
+        conversationStateMachine.releaseReconnectLock();
         console.error('WebSocket error:', err);
         setErrorMessage('Connection issue detected. Please check network connectivity and microphone access.');
       };
 
       ws.onclose = () => {
+        conversationStateMachine.releaseReconnectLock();
         // If user didn't intentionally stop the call, auto-reconnect!
         if (callStatusRef.current !== 'idle') {
           setStatusMessage('Refreshing 5-minute session...');
@@ -396,6 +470,7 @@ export default function App() {
         }
       };
     } catch (err: any) {
+      conversationStateMachine.releaseReconnectLock();
       console.error('Start call error:', err);
       setErrorMessage(err.message || 'Failed to start call');
       stopCall();
@@ -445,6 +520,7 @@ export default function App() {
 
   // Stop Call Handler
   const stopCall = () => {
+    conversationStateMachine.releaseReconnectLock();
     clearInactivityTimer();
     callStatusRef.current = 'idle';
     // Stop timers
@@ -613,33 +689,148 @@ export default function App() {
     }, 1000); // 1 frame per second
   };
 
-  // Send typed prompt directly into the Live session
-  const handleSendTypedMessage = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!typedMessage.trim()) return;
-
-    const text = typedMessage.trim();
+  // Send quick action or typed text directly into live session (acts like speech)
+  const sendQuickActionMessage = (text: string) => {
+    if (!text.trim()) return;
+    const cleanText = text.trim();
     clearInactivityTimer();
-    setTypedMessage('');
-    addTranscript('user', text);
+    addTranscript('user', cleanText);
+    conversationStateMachine.processStudentInput(cleanText);
+
+    // Stop current AI audio immediately so it responds right away to student's text
+    audioPlayerRef.current?.stopAndClear();
+    setCallStatus('interrupted');
+    setTimeout(() => setCallStatus('active'), 400);
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
         JSON.stringify({
           type: 'text',
-          text,
+          text: cleanText,
         })
       );
+      setStatusMessage('মেসেজ পাঠানো হয়েছে (AI উত্তর দিচ্ছে)...');
     } else {
-      // If call not active, start call with this message
+      // If call not active, start call and deliver text once connected
+      setStatusMessage('লাইভ কল শুরু করে মেসেজ পাঠানো হচ্ছে...');
       startCall().then(() => {
         setTimeout(() => {
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'text', text }));
+            wsRef.current.send(JSON.stringify({ type: 'text', text: cleanText }));
           }
-        }, 1500);
+        }, 1200);
       });
     }
+  };
+
+  // Send typed prompt directly into the Live session
+  const handleSendTypedMessage = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!typedMessage.trim()) return;
+    const text = typedMessage.trim();
+    setTypedMessage('');
+    sendQuickActionMessage(text);
+  };
+
+  const WBBSE_CLASSES = ['Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'];
+
+  const COMPETITIVE_SUBJECTS = [
+    { id: 'spoken-english', title: 'Spoken English', prompt: SHREYA_MAAM_PROMPT, voice: 'Kore', icon: '🗣️' },
+    { id: 'indian-history', title: 'Indian History', prompt: BHATTACHARYA_SIR_PROMPT, voice: 'Charon', icon: '📜' },
+    { id: 'polity-constitution', title: 'Polity & Constitution', prompt: SARMAD_MEHRAJ_SIR_PROMPT, voice: 'Charon', icon: '⚖️' },
+    { id: 'indian-economy', title: 'Indian Economy', prompt: MRUNAL_PATEL_SIR_PROMPT, voice: 'Puck', icon: '📈' },
+    { id: 'geography-astronomy', title: 'Geography & Astronomy', prompt: SUDARSHAN_GURJAR_SIR_PROMPT, voice: 'Fenrir', icon: '🌍' },
+    { id: 'science-tech', title: 'Science & Technology', prompt: DR_SENGUPTA_PROMPT, voice: 'Fenrir', icon: '🔬' },
+    { id: 'static-gk', title: 'Static GK', prompt: ADHIKARI_SIR_PROMPT, voice: 'Charon', icon: '🏛️' },
+  ];
+
+  const handleSelectClass = (cls: string) => {
+    setSelectedClass(cls);
+    setActiveSection('wbbse');
+    const subjectName = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
+    // Clear old session resume handle so previous subject never bleeds in
+    lastResumptionHandleRef.current = null;
+    conversationStateMachine.setResumptionHandle(null);
+    conversationStateMachine.setTeachingMode(teachingMode, cls, subjectName);
+  };
+
+  const handleSelectWbbseSubject = (subj: 'science' | 'history' | 'geography') => {
+    setSelectedWbbseSubject(subj);
+    setActiveSection('wbbse');
+    const prompt = subj === 'science' ? WBBSE_SCIENCE_PROMPT : subj === 'history' ? WBBSE_HISTORY_PROMPT : WBBSE_GEOGRAPHY_PROMPT;
+    const defaultVoice = subj === 'science' ? 'Kore' : 'Charon';
+    const subjectName = subj === 'science' ? 'বিজ্ঞান' : subj === 'history' ? 'ইতিহাস' : 'ভূগোল';
+
+    // Clear old session resume handle so previous subject never bleeds in
+    lastResumptionHandleRef.current = null;
+    conversationStateMachine.setResumptionHandle(null);
+    setVoice(defaultVoice);
+    setSystemInstruction(prompt);
+    conversationStateMachine.updatePersona(prompt);
+    conversationStateMachine.setTeachingMode(teachingMode, selectedClass, subjectName);
+  };
+
+  const handleSelectCompetitiveSubject = (compSubj: typeof COMPETITIVE_SUBJECTS[0]) => {
+    setSelectedCompetitiveSubject(compSubj.title);
+    setActiveSection('competitive');
+
+    // Clear old session resume handle so previous subject never bleeds in
+    lastResumptionHandleRef.current = null;
+    conversationStateMachine.setResumptionHandle(null);
+    setVoice(compSubj.voice);
+    setSystemInstruction(compSubj.prompt);
+    conversationStateMachine.updatePersona(compSubj.prompt);
+    conversationStateMachine.setTeachingMode(teachingMode, 'Competitive & Spoken', compSubj.title);
+  };
+
+  const handleSelectMode = (mode: TeachingMode) => {
+    setTeachingModeState(mode);
+
+    let cls: string;
+    let subjectName: string;
+    let prompt: string;
+    let defaultVoice: string;
+
+    if (activeSection === 'wbbse') {
+      cls = selectedClass || 'Class 10';
+      subjectName = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
+      prompt = selectedWbbseSubject === 'science' ? WBBSE_SCIENCE_PROMPT : selectedWbbseSubject === 'history' ? WBBSE_HISTORY_PROMPT : WBBSE_GEOGRAPHY_PROMPT;
+      defaultVoice = selectedWbbseSubject === 'science' ? 'Kore' : 'Charon';
+    } else {
+      cls = 'Competitive & Spoken';
+      subjectName = selectedCompetitiveSubject;
+      const found = COMPETITIVE_SUBJECTS.find((s) => s.title === selectedCompetitiveSubject) || COMPETITIVE_SUBJECTS[0];
+      prompt = found.prompt;
+      defaultVoice = found.voice;
+    }
+
+    setVoice(defaultVoice);
+    setSystemInstruction(prompt);
+    conversationStateMachine.updatePersona(prompt);
+    conversationStateMachine.setTeachingMode(mode, cls, subjectName);
+
+    const modeLabel = mode === 'lecture' ? 'আলোচনা' : mode === 'doubts' ? 'AI কে প্রশ্ন' : 'প্রশ্ন উত্তর';
+
+    // Point 2: If call is idle, do NOT auto-start call. User starts via Start button.
+    // If call is already active, dynamically switch mode live:
+    if (callStatus !== 'idle' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const modeText = mode === 'lecture'
+        ? `[মোড পরিবর্তন: আলোচনা]: এখন থেকে আমরা "আলোচনা" মোডে পড়াশোনা করব। কোনো অপ্রয়োজনীয় ভূমিকা ছাড়া ${cls} ${subjectName}-এর বিষয়বস্তু একটানা অনর্গল বিস্তারিতভাবে বাংলায় বুঝিয়ে যান।`
+        : mode === 'doubts'
+        ? `[মোড পরিবর্তন: AI কে প্রশ্ন]: এখন থেকে আমরা "AI কে প্রশ্ন" মোডে পড়াশোনা করব। আমার যেকোনো প্রশ্ন বা ডাউট শুনুন এবং বাংলায় সহজ করে বুঝিয়ে উত্তর দিন।`
+        : `[মোড পরিবর্তন: প্রশ্ন উত্তর]: এখন থেকে আমরা "প্রশ্ন উত্তর" মোডে পড়াশোনা করব। আপনি আমাকে ${cls} ${subjectName}-এর উপর একটি একটি করে প্রশ্ন/MCQ জিজ্ঞাসা করুন এবং আমি উত্তর দেব।`;
+
+      addTranscript('user', `[মোড পরিবর্তন: ${modeLabel}]`);
+      wsRef.current.send(JSON.stringify({ type: 'text', text: modeText }));
+      setStatusMessage(`সক্রিয় মোড: ${modeLabel}`);
+    }
+  };
+
+  const handleSelectPersona = (prompt: string, defaultVoice: string) => {
+    setVoice(defaultVoice);
+    setSystemInstruction(prompt);
+    conversationStateMachine.updatePersona(prompt);
+    startCall();
   };
 
   const selectedVoiceMeta = VOICES.find((v) => v.id === voice) || VOICES[0];
@@ -765,6 +956,12 @@ export default function App() {
                 <span>Voice:</span>
                 <strong className="text-white">{voice}</strong>
               </span>
+              {activeContext.currentTopic && (
+                <span className="flex items-center gap-1.5 bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 px-2.5 py-1 rounded-md text-xs">
+                  <BookOpen className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                  <span className="font-semibold truncate max-w-[130px] sm:max-w-[200px]">{activeContext.currentTopic}</span>
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -822,12 +1019,58 @@ export default function App() {
               size={260}
             />
 
+            {/* Live In-Call Mode Indicator & Switcher */}
+            {callStatus !== 'idle' && (
+              <div className="mt-3 flex items-center gap-2 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl backdrop-blur-md">
+                <span className="text-[10px] text-slate-400 font-semibold px-2 hidden sm:inline">পড়ার মোড:</span>
+                <button
+                  type="button"
+                  onClick={() => handleSelectMode('lecture')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                    teachingMode === 'lecture'
+                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/40 ring-1 ring-emerald-400'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                  }`}
+                  title="AI একটানা অধ্যায়ের বিষয়বস্তু বিস্তারিত বোঝাবে (Non-stop Lecture)"
+                >
+                  <span>🎙️</span>
+                  <span>আলোচনা</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectMode('doubts')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                    teachingMode === 'doubts'
+                      ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/40 ring-1 ring-cyan-400'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                  }`}
+                  title="তোমার প্রশ্নের উত্তর দেবে AI (Doubt Clearing)"
+                >
+                  <span>🙋‍♂️</span>
+                  <span>AI কে প্রশ্ন</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectMode('quiz')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                    teachingMode === 'quiz'
+                      ? 'bg-purple-600 text-white shadow-md shadow-purple-600/40 ring-1 ring-purple-400'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                  }`}
+                  title="AI তোমাকে প্রশ্ন করবে, তুমি উত্তর দেবে (Oral Test & Quiz)"
+                >
+                  <span>📝</span>
+                  <span>প্রশ্ন উত্তর</span>
+                </button>
+              </div>
+            )}
+
             {/* Status Text & Subtitle */}
             <div className="mt-4 text-center">
               <p className="text-sm font-semibold text-slate-200 tracking-wide">{statusMessage}</p>
               <p className="text-xs text-slate-500 mt-1 max-w-md">
                 {callStatus === 'idle'
-                  ? 'Click "Start Live Call" to start duplex real-time speech conversation.'
+                  ? 'শ্রেণি ও মোড নির্বাচন করে সরাসরি লাইভ ক্লাস শুরু করো।'
                   : 'Speak into your microphone. Say anything or ask questions to interrupt and converse.'}
               </p>
             </div>
@@ -835,135 +1078,182 @@ export default function App() {
             {/* Quick Starter Conversation Prompts - Strictly Separated Sections */}
             {callStatus === 'idle' && (
               <div className="mt-5 w-full max-w-3xl space-y-3">
-                {/* 1. WBBSE (Class V - X) */}
-                <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-r from-emerald-950/40 via-slate-900/60 to-emerald-950/40 p-3 shadow-lg shadow-emerald-950/20">
-                  <div className="flex items-center justify-between mb-2 px-1">
-                    <span className="text-[11px] sm:text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                      <BookOpen className="h-3.5 w-3.5" />
-                      WBBSE (Class V - X)
+                {/* 1. WBBSE (Class V - X) Section with Class Selector & 3 Modes */}
+                <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-r from-emerald-950/40 via-slate-900/60 to-emerald-950/40 p-3 sm:p-4 shadow-lg shadow-emerald-950/20">
+                  <div className="flex items-center justify-between mb-2.5 px-1">
+                    <span className="text-xs sm:text-sm font-bold text-emerald-400 flex items-center gap-1.5">
+                      <BookOpen className="h-4 w-4" />
+                      WBBSE পশ্চিমবঙ্গ মধ্যশিক্ষা পর্ষদ (Class V - X)
                     </span>
-                    <span className="text-[9px] sm:text-[10px] text-emerald-300 bg-emerald-950/90 border border-emerald-500/40 px-2 py-0.5 rounded-full font-medium shadow-sm">
+                    <span className="text-[10px] text-emerald-300 bg-emerald-950/90 border border-emerald-500/40 px-2 py-0.5 rounded-full font-medium shadow-sm">
                       বাংলা পাঠ্যবই
                     </span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <button
-                      onClick={() => {
-                        setVoice('Charon');
-                        setSystemInstruction(WBBSE_HISTORY_PROMPT);
-                        startCall();
-                      }}
-                      className="px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10 hover:scale-[1.02] flex items-center justify-center gap-1.5 text-center"
-                    >
-                      <span>📖</span>
-                      <span>ইতিহাস (Class V - X)</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setVoice('Kore');
-                        setSystemInstruction(WBBSE_SCIENCE_PROMPT);
-                        startCall();
-                      }}
-                      className="px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10 hover:scale-[1.02] flex items-center justify-center gap-1.5 text-center"
-                    >
-                      <span>🔬</span>
-                      <span>বিজ্ঞান (ভৌত+জীবন · Class V - X)</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setVoice('Charon');
-                        setSystemInstruction(WBBSE_GEOGRAPHY_PROMPT);
-                        startCall();
-                      }}
-                      className="px-3 py-2 rounded-xl border border-emerald-500/40 bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 text-xs font-semibold transition-all shadow-sm shadow-emerald-500/10 hover:scale-[1.02] flex items-center justify-center gap-1.5 text-center"
-                    >
-                      <span>🗺️</span>
-                      <span>ভূগোল (Class V - X)</span>
-                    </button>
+
+                  {/* Step 1: Select Class - Pure Class Names (Class 5 - Class 10) */}
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-1.5 px-1">
+                      <span className="text-[11px] font-semibold text-slate-300">
+                        শ্রেণি নির্বাচন করুন:
+                      </span>
+                      {selectedClass && (
+                        <span className="text-[10px] text-emerald-400 font-mono font-medium">
+                          {selectedClass}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                      {WBBSE_CLASSES.map((cls) => {
+                        const isSelected = selectedClass === cls;
+                        return (
+                          <button
+                            key={cls}
+                            type="button"
+                            onClick={() => handleSelectClass(cls)}
+                            className={`py-1.5 px-2 rounded-xl text-xs font-semibold text-center transition-all border ${
+                              isSelected
+                                ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-600/30 scale-105'
+                                : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-emerald-500/40'
+                            }`}
+                          >
+                            {cls}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Step 2: Select Subject */}
+                  <div className="mb-3">
+                    <div className="flex items-center justify-between mb-1.5 px-1">
+                      <span className="text-[11px] font-semibold text-slate-300">
+                        বিষয় নির্বাচন করুন:
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectWbbseSubject('science')}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-center gap-1.5 text-center ${
+                          selectedWbbseSubject === 'science'
+                            ? 'border-emerald-400 bg-emerald-900/80 text-white shadow-md shadow-emerald-500/20'
+                            : 'border-emerald-500/30 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-200'
+                        }`}
+                      >
+                        <span>🔬</span>
+                        <span>বিজ্ঞান (ভৌত+জীবন)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectWbbseSubject('history')}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-center gap-1.5 text-center ${
+                          selectedWbbseSubject === 'history'
+                            ? 'border-emerald-400 bg-emerald-900/80 text-white shadow-md shadow-emerald-500/20'
+                            : 'border-emerald-500/30 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-200'
+                        }`}
+                      >
+                        <span>📖</span>
+                        <span>ইতিহাস</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectWbbseSubject('geography')}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all flex items-center justify-center gap-1.5 text-center ${
+                          selectedWbbseSubject === 'geography'
+                            ? 'border-emerald-400 bg-emerald-900/80 text-white shadow-md shadow-emerald-500/20'
+                            : 'border-emerald-500/30 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-200'
+                        }`}
+                      >
+                        <span>🗺️</span>
+                        <span>ভূগোল</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* 2. Competitive & Spoken */}
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
-                  <div className="flex items-center justify-between mb-2 px-1">
-                    <span className="text-[11px] sm:text-xs font-bold text-amber-400 flex items-center gap-1.5">
-                      <GraduationCap className="h-3.5 w-3.5" />
+                {/* 2. Competitive & Spoken Section */}
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-3 sm:p-4">
+                  <div className="flex items-center justify-between mb-2.5 px-1">
+                    <span className="text-xs sm:text-sm font-bold text-amber-400 flex items-center gap-1.5">
+                      <GraduationCap className="h-4 w-4" />
                       Competitive & Spoken
                     </span>
-                    <span className="text-[9px] text-amber-400/80 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
-                      বিষয়সমূহ
+                    <span className="text-[10px] text-amber-400/80 bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
+                      বিষয়সমূহ
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center justify-center gap-1.5">
+                    {COMPETITIVE_SUBJECTS.map((comp) => {
+                      const isSelected = activeSection === 'competitive' && selectedCompetitiveSubject === comp.title;
+                      return (
+                        <button
+                          key={comp.id}
+                          type="button"
+                          onClick={() => handleSelectCompetitiveSubject(comp)}
+                          className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                            isSelected
+                              ? 'border-amber-400 bg-amber-900/70 text-white shadow-md shadow-amber-500/20'
+                              : 'border-slate-700 bg-slate-800/60 hover:bg-slate-800 text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          <span>{comp.icon} {comp.title}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. Unified Mode Section (One single selector for all subjects) */}
+                <div className="rounded-2xl border border-indigo-500/40 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 p-3 sm:p-4 shadow-lg shadow-indigo-950/20">
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <span className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-1.5">
+                      পড়ার মোড ({activeSection === 'wbbse' ? `${selectedClass} - ${selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল'}` : selectedCompetitiveSubject}):
+                    </span>
+                    <span className="text-[10px] text-cyan-300 bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded-full font-medium">
+                      {activeSection === 'wbbse' ? 'WBBSE' : 'Competitive & Spoken'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    {/* Option 1: আলোচনা */}
                     <button
-                      onClick={() => {
-                        setVoice('Kore');
-                        setSystemInstruction(SHREYA_MAAM_PROMPT);
-                        startCall();
-                      }}
-                      className="px-2.5 py-1 rounded-lg border border-amber-500/30 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 text-[11px] font-medium transition-colors"
+                      type="button"
+                      onClick={() => handleSelectMode('lecture')}
+                      className={`py-2 px-2.5 sm:px-3 rounded-xl border text-center transition-all font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm ${
+                        teachingMode === 'lecture'
+                          ? 'bg-emerald-600 text-white border-emerald-400 shadow-emerald-600/30 ring-1 ring-emerald-400'
+                          : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-emerald-500/40'
+                      }`}
                     >
-                      🗣️ Spoken English
+                      <span>🎙️</span>
+                      <span>আলোচনা</span>
                     </button>
+
+                    {/* Option 2: AI কে প্রশ্ন */}
                     <button
-                      onClick={() => {
-                        setVoice('Charon');
-                        setSystemInstruction(BHATTACHARYA_SIR_PROMPT);
-                        startCall();
-                      }}
-                      className="px-2.5 py-1 rounded-lg border border-amber-500/30 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 text-[11px] font-medium transition-colors"
+                      type="button"
+                      onClick={() => handleSelectMode('doubts')}
+                      className={`py-2 px-2.5 sm:px-3 rounded-xl border text-center transition-all font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm ${
+                        teachingMode === 'doubts'
+                          ? 'bg-cyan-600 text-white border-cyan-400 shadow-cyan-600/30 ring-1 ring-cyan-400'
+                          : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-cyan-500/40'
+                      }`}
                     >
-                      📜 Indian History
+                      <span>🙋‍♂️</span>
+                      <span>AI কে প্রশ্ন</span>
                     </button>
+
+                    {/* Option 3: প্রশ্ন উত্তর */}
                     <button
-                      onClick={() => {
-                        setVoice('Charon');
-                        setSystemInstruction(SARMAD_MEHRAJ_SIR_PROMPT);
-                        startCall();
-                      }}
-                      className="px-2.5 py-1 rounded-lg border border-cyan-500/30 bg-cyan-950/30 hover:bg-cyan-900/40 text-cyan-300 text-[11px] font-medium transition-colors"
+                      type="button"
+                      onClick={() => handleSelectMode('quiz')}
+                      className={`py-2 px-2.5 sm:px-3 rounded-xl border text-center transition-all font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm ${
+                        teachingMode === 'quiz'
+                          ? 'bg-purple-600 text-white border-purple-400 shadow-purple-600/30 ring-1 ring-purple-400'
+                          : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-purple-500/40'
+                      }`}
                     >
-                      ⚖️ Polity & Constitution
-                    </button>
-                    <button
-                      onClick={() => {
-                        setVoice('Puck');
-                        setSystemInstruction(MRUNAL_PATEL_SIR_PROMPT);
-                        startCall();
-                      }}
-                      className="px-2.5 py-1 rounded-lg border border-emerald-500/30 bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-300 text-[11px] font-medium transition-colors"
-                    >
-                      📈 Indian Economy
-                    </button>
-                    <button
-                      onClick={() => {
-                        setVoice('Fenrir');
-                        setSystemInstruction(SUDARSHAN_GURJAR_SIR_PROMPT);
-                        startCall();
-                      }}
-                      className="px-2.5 py-1 rounded-lg border border-blue-500/30 bg-blue-950/30 hover:bg-blue-900/40 text-blue-300 text-[11px] font-medium transition-colors"
-                    >
-                      🌍 Geography & Astronomy
-                    </button>
-                    <button
-                      onClick={() => {
-                        setVoice('Fenrir');
-                        setSystemInstruction(DR_SENGUPTA_PROMPT);
-                        startCall();
-                      }}
-                      className="px-2.5 py-1 rounded-lg border border-teal-500/30 bg-teal-950/30 hover:bg-teal-900/40 text-teal-300 text-[11px] font-medium transition-colors"
-                    >
-                      🔬 Science & Technology
-                    </button>
-                    <button
-                      onClick={() => {
-                        setVoice('Charon');
-                        setSystemInstruction(ADHIKARI_SIR_PROMPT);
-                        startCall();
-                      }}
-                      className="px-2.5 py-1 rounded-lg border border-purple-500/30 bg-purple-950/30 hover:bg-purple-900/40 text-purple-300 text-[11px] font-medium transition-colors"
-                    >
-                      🏛️ Static GK
+                      <span>📝</span>
+                      <span>প্রশ্ন উত্তর</span>
                     </button>
                   </div>
                 </div>
@@ -1071,24 +1361,69 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Quick Action Touch Buttons directly above Chat Input */}
+              <div className="w-full max-w-xl flex items-center justify-between gap-1.5 sm:gap-2 px-0.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    sendQuickActionMessage(
+                      teachingMode === 'quiz'
+                        ? 'পরের প্রশ্নটি জিজ্ঞাসা করো'
+                        : 'পরের বিষয়টি নিয়ে বিস্তারিত আলোচনা করো'
+                    )
+                  }
+                  className="flex-1 py-1.5 px-2 rounded-xl border border-cyan-500/40 bg-cyan-950/50 hover:bg-cyan-900/60 active:scale-95 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm transition-all"
+                  title="পরের বিষয় বা প্রশ্ন"
+                >
+                  <span>⏭️</span>
+                  <span className="truncate">Next (পরের বিষয়)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    sendQuickActionMessage('আগের বিষয়টি আরেকবার সহজ করে সুন্দরভাবে বুঝিয়ে দাও')
+                  }
+                  className="flex-1 py-1.5 px-2 rounded-xl border border-amber-500/40 bg-amber-950/50 hover:bg-amber-900/60 active:scale-95 text-amber-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm transition-all"
+                  title="আবার সুন্দর করে বোঝাও"
+                >
+                  <span>🔁</span>
+                  <span className="truncate">Repeat (আবার বলো)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    sendQuickActionMessage(
+                      teachingMode === 'quiz'
+                        ? 'সঠিক উত্তরটি বুঝিয়ে বলো এবং পরের প্রশ্ন দাও'
+                        : 'এই বিষয়টি আরেকটু গভীরে গিয়ে উদাহরণসহ বুঝিয়ে দাও'
+                    )
+                  }
+                  className="flex-1 py-1.5 px-2 rounded-xl border border-purple-500/40 bg-purple-950/50 hover:bg-purple-900/60 active:scale-95 text-purple-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm transition-all"
+                  title="আরও বিস্তারিত তথ্য"
+                >
+                  <span>❓</span>
+                  <span className="truncate">Detail (আরও বলো)</span>
+                </button>
+              </div>
+
               {/* In-Call Text Input Bar */}
               <form
                 onSubmit={handleSendTypedMessage}
-                className="w-full max-w-xl flex items-center gap-1.5 sm:gap-2 bg-slate-900/70 border border-slate-800 rounded-xl p-1.5 pl-2.5 sm:pl-3 focus-within:border-cyan-500"
+                className="w-full max-w-xl flex items-center gap-1.5 sm:gap-2 bg-slate-900/80 border border-slate-700/80 rounded-xl p-1.5 pl-2.5 sm:pl-3 focus-within:border-cyan-400 shadow-lg"
               >
                 <input
                   type="text"
                   value={typedMessage}
                   onChange={(e) => setTypedMessage(e.target.value)}
-                  placeholder="Or type a message directly into the live conversation..."
-                  className="flex-1 bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none"
+                  placeholder="কথা বলতে না পারলে এখানে লিখুন (Enter চাপুন)..."
+                  className="flex-1 bg-transparent text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none"
                 />
                 <button
                   type="submit"
                   disabled={!typedMessage.trim()}
-                  className="px-2.5 sm:px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold transition-all flex items-center gap-1 shrink-0"
+                  className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold transition-all flex items-center gap-1 shrink-0"
                 >
-                  <Send className="h-3 w-3" />
+                  <Send className="h-3.5 w-3.5" />
                   <span className="hidden xs:inline">Send</span>
                 </button>
               </form>
@@ -1225,51 +1560,98 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Microphone Sensitivity & Voice Detection */}
+              {/* Microphone Sensitivity & Noise Rejection */}
               <div className="bg-slate-950/40 p-3.5 rounded-xl border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
                     <Sliders className="h-3.5 w-3.5 text-cyan-400" />
-                    Microphone Sensitivity (Wide Range)
+                    Microphone Sensitivity (নয়েজ ফিল্টারিং)
                   </label>
                   <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-500/30">
-                    {micSensitivity >= 90 ? 'Ultra' : micSensitivity >= 75 ? 'High' : micSensitivity >= 50 ? 'Balanced' : 'Low'} ({micSensitivity}%)
+                    {micSensitivity === 0
+                      ? '0% (Full Noise Shield)'
+                      : micSensitivity <= 30
+                      ? `Heavy Noise Cut (${micSensitivity}%)`
+                      : micSensitivity <= 60
+                      ? `Balanced (${micSensitivity}%)`
+                      : `Quiet Room (${micSensitivity}%)`}
                   </span>
                 </div>
+
+                {/* Quick Presets */}
                 <div className="grid grid-cols-4 gap-1.5">
                   {[
-                    { label: 'Low', val: 30 },
-                    { label: 'Balanced', val: 60 },
-                    { label: 'High (Fast)', val: 80 },
-                    { label: 'Ultra', val: 95 },
+                    { label: '0% Full Noise', val: 0, sub: 'ফ্যান/কোলাহল' },
+                    { label: '30% Moderate', val: 30, sub: 'সাধারণ ফ্যান' },
+                    { label: '60% Balanced', val: 60, sub: 'স্বাভাবিক' },
+                    { label: '100% No Noise', val: 100, sub: 'শান্ত ঘর' },
                   ].map((preset) => (
                     <button
                       key={preset.val}
                       type="button"
                       onClick={() => setMicSensitivity(preset.val)}
-                      className={`py-1.5 px-1 text-center rounded-lg border text-[11px] font-medium transition-all ${
+                      className={`py-1 px-1 text-center rounded-lg border transition-all ${
                         micSensitivity === preset.val
                           ? 'border-cyan-500 bg-cyan-950/50 text-cyan-300 shadow-sm shadow-cyan-500/20'
                           : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-slate-800'
                       }`}
                     >
-                      {preset.label}
+                      <div className="text-[11px] font-semibold">{preset.label}</div>
+                      <div className="text-[9px] text-slate-500">{preset.sub}</div>
                     </button>
                   ))}
                 </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  step="5"
-                  value={micSensitivity}
-                  onChange={(e) => setMicSensitivity(parseInt(e.target.value, 10))}
-                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
-                />
-                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                  <span>10% (Ignores noise)</span>
-                  <span>60% (Balanced)</span>
-                  <span>100% (Instant capture)</span>
+
+                {/* 0% to 100% Slider */}
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={micSensitivity}
+                    onChange={(e) => setMicSensitivity(parseInt(e.target.value, 10))}
+                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+                  />
+                  <div className="flex justify-between items-center text-[10px] font-mono px-0.5">
+                    <span className="text-amber-400 font-semibold">0% (Full Noise / ভারী আওয়াজ)</span>
+                    <span className="text-slate-400">50% (Balanced)</span>
+                    <span className="text-emerald-400 font-semibold">100% (No Noise / শান্ত ঘর)</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                  💡 <strong>টিপস:</strong> ঘরে ফ্যান, টিভি বা বাইরের আওয়াজ থাকলে স্লাইডারটি <strong>০%</strong> বা <strong>৩০%</strong>-এ রাখুন। এতে ফ্যানের শব্দে AI কোনোভাবেই অনাকাঙ্ক্ষিত বাধা পাবে না। শিক্ষার্থী স্পষ্ট করে কথা বললেই কেবল AI শুনবে।
+                </p>
+
+                {/* Extra Solutions Provided for False Interruption Prevention */}
+                <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-semibold text-slate-200 flex items-center gap-1.5">
+                        <Zap className="h-3 w-3 text-cyan-400" />
+                        Acoustic Echo Shield (ইকো শিল্ড)
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        স্পিকারের আওয়াজ মাইক্রোফোনে ঢুকে AI থেমে যাওয়া বন্ধ রাখে
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEchoShieldEnabled(!echoShieldEnabled)}
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${
+                        echoShieldEnabled
+                          ? 'border-emerald-500 bg-emerald-950/60 text-emerald-300'
+                          : 'border-slate-700 bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {echoShieldEnabled ? 'ON (সক্রিয়)' : 'OFF'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 bg-emerald-950/20 border border-emerald-500/20 p-2 rounded-lg">
+                    <span>🛡️ <strong>120Hz ফ্যান ও মোটর নয়েজ ফিল্টার:</strong> অনাকাঙ্ক্ষিত কম্পন ও গুঞ্জন স্বয়ংক্রিয়ভাবে ফিল্টার করা হচ্ছে।</span>
+                  </div>
                 </div>
 
                 {/* Silence Wait Window (1.25s) */}
@@ -1305,8 +1687,8 @@ export default function App() {
               </div>
 
               {callStatus !== 'idle' && (
-                <p className="text-[11px] text-amber-400/80 bg-amber-950/30 p-2.5 rounded-lg border border-amber-500/20">
-                  Settings are locked during an active call. End the call to adjust model or voice configuration.
+                <p className="text-[11px] text-cyan-300/90 bg-cyan-950/40 p-2.5 rounded-lg border border-cyan-500/30">
+                  ⚡ <strong>লাইভ টিউনিং:</strong> মডেল ও ভয়েস লক থাকলেও মাইক্রোফোন সেনসিটিভিটি (০%-১০০%), ফ্যান শিল্ড ও স্পিড কল চলাকালীন যেকোনো সময় পরিবর্তন করতে পারবেন।
                 </p>
               )}
             </div>
@@ -1335,12 +1717,75 @@ export default function App() {
               ✕
             </button>
           </div>
-          <div className="flex-1 overflow-hidden pt-3">
+          <div className="flex-1 overflow-hidden py-2">
             <TranscriptView
               items={transcripts}
               onClear={() => setTranscripts([])}
               voiceName={voice}
             />
+          </div>
+
+          {/* Quick Action Touch Buttons & Chat for Mobile */}
+          <div className="pt-2 border-t border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-1.5">
+              <button
+                type="button"
+                onClick={() =>
+                  sendQuickActionMessage(
+                    teachingMode === 'quiz'
+                      ? 'পরের প্রশ্নটি জিজ্ঞাসা করো'
+                      : 'পরের বিষয়টি নিয়ে বিস্তারিত আলোচনা করো'
+                  )
+                }
+                className="flex-1 py-1.5 px-1.5 rounded-lg border border-cyan-500/40 bg-cyan-950/60 active:scale-95 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm"
+              >
+                <span>⏭️</span>
+                <span>Next</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  sendQuickActionMessage('আগের বিষয়টি আরেকবার সহজ করে সুন্দরভাবে বুঝিয়ে দাও')
+                }
+                className="flex-1 py-1.5 px-1.5 rounded-lg border border-amber-500/40 bg-amber-950/60 active:scale-95 text-amber-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm"
+              >
+                <span>🔁</span>
+                <span>Repeat</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  sendQuickActionMessage(
+                    teachingMode === 'quiz'
+                      ? 'সঠিক উত্তরটি বুঝিয়ে বলো এবং পরের প্রশ্ন দাও'
+                      : 'এই বিষয়টি আরেকটু গভীরে গিয়ে উদাহরণসহ বুঝিয়ে দাও'
+                  )
+                }
+                className="flex-1 py-1.5 px-1.5 rounded-lg border border-purple-500/40 bg-purple-950/60 active:scale-95 text-purple-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm"
+              >
+                <span>❓</span>
+                <span>Detail</span>
+              </button>
+            </div>
+            <form
+              onSubmit={handleSendTypedMessage}
+              className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl p-1.5 pl-2.5 focus-within:border-cyan-400"
+            >
+              <input
+                type="text"
+                value={typedMessage}
+                onChange={(e) => setTypedMessage(e.target.value)}
+                placeholder="মুখে বলতে না পারলে এখানে লিখুন..."
+                className="flex-1 bg-transparent text-xs text-white placeholder-slate-400 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={!typedMessage.trim()}
+                className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold"
+              >
+                <Send className="h-3 w-3" />
+              </button>
+            </form>
           </div>
         </div>
       )}
