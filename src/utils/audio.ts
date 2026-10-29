@@ -14,6 +14,8 @@ export class LiveAudioPlayer {
   private playbackRate = 1.0;
   private lastChunkTime = 0;
 
+  private leftoverBytes: Uint8Array | null = null;
+
   constructor() {
     // Lazily initialized on user gesture
   }
@@ -39,7 +41,12 @@ export class LiveAudioPlayer {
   public init() {
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      this.ctx = new AudioCtx({ sampleRate: 24000 });
+      try {
+        // Prefer default hardware sample rate for zero buffer underruns on mobile
+        this.ctx = new AudioCtx();
+      } catch (e) {
+        this.ctx = new AudioCtx({ sampleRate: 24000 });
+      }
       this.analyser = this.ctx.createAnalyser();
       this.analyser.fftSize = 256;
       this.analyser.smoothingTimeConstant = 0.8;
@@ -62,18 +69,46 @@ export class LiveAudioPlayer {
     try {
       const binary = atob(base64Pcm);
       const len = binary.length;
-      const bytes = new Uint8Array(len);
+      if (len === 0) return;
+
+      const rawBytes = new Uint8Array(len);
       for (let i = 0; i < len; i++) {
-        bytes[i] = binary.charCodeAt(i);
+        rawBytes[i] = binary.charCodeAt(i);
       }
 
-      // Convert 16-bit signed PCM to float32
-      const int16 = new Int16Array(bytes.buffer);
+      // Safely stitch any leftover dangling byte from previous packet
+      // to ensure 16-bit PCM word alignment is never corrupted and RangeError is never thrown
+      let totalBytes: Uint8Array;
+      if (this.leftoverBytes && this.leftoverBytes.length > 0) {
+        totalBytes = new Uint8Array(this.leftoverBytes.length + len);
+        totalBytes.set(this.leftoverBytes, 0);
+        totalBytes.set(rawBytes, this.leftoverBytes.length);
+        this.leftoverBytes = null;
+      } else {
+        totalBytes = rawBytes;
+      }
+
+      // If odd number of bytes, save the trailing byte for the next chunk
+      const remainder = totalBytes.length % 2;
+      if (remainder !== 0) {
+        this.leftoverBytes = totalBytes.slice(totalBytes.length - remainder);
+        totalBytes = totalBytes.subarray(0, totalBytes.length - remainder);
+      }
+
+      if (totalBytes.length === 0) return;
+
+      // Convert 16-bit signed PCM (little-endian) to float32
+      const int16 = new Int16Array(
+        totalBytes.buffer,
+        totalBytes.byteOffset,
+        totalBytes.length / 2
+      );
       const float32 = new Float32Array(int16.length);
       for (let i = 0; i < int16.length; i++) {
         float32[i] = int16[i] / (int16[i] < 0 ? 32768 : 32767);
       }
 
+      // AudioBuffer created at 24000Hz (native Gemini Live output rate)
       const audioBuffer = this.ctx.createBuffer(1, float32.length, 24000);
       audioBuffer.getChannelData(0).set(float32);
 
@@ -83,13 +118,19 @@ export class LiveAudioPlayer {
       source.connect(this.analyser);
 
       const currentTime = this.ctx.currentTime;
-      // Schedule gapless playback with a 60ms jitter buffer for smooth playback without pops
+      const effectiveDuration = audioBuffer.duration / this.playbackRate;
+
+      // Seamless scheduling:
+      // If nextStartTime has fallen behind currentTime:
       if (this.nextStartTime < currentTime) {
-        this.nextStartTime = currentTime + 0.060;
+        const gap = currentTime - this.nextStartTime;
+        // If there has been a real silence (> 150ms between turns), give a tiny 20ms lead time
+        // If it's just minor network jitter (< 150ms during continuous speech), play immediately (+3ms)
+        // to prevent artificial 60ms dead silences that drop syllables and words mid-speech!
+        this.nextStartTime = currentTime + (gap > 0.150 ? 0.020 : 0.003);
       }
 
       source.start(this.nextStartTime);
-      const effectiveDuration = audioBuffer.duration / this.playbackRate;
       this.nextStartTime += effectiveDuration;
 
       this.activeSources.push(source);
@@ -106,6 +147,7 @@ export class LiveAudioPlayer {
 
   public stopAndClear() {
     this.lastChunkTime = 0;
+    this.leftoverBytes = null;
     this.activeSources.forEach((s) => {
       try {
         s.stop();
@@ -363,52 +405,25 @@ export class LiveAudioRecorder {
       const speechSustainThreshold = speechOnsetThreshold * 0.55;
       const speechSustainPeak = speechPeakThreshold * 0.60;
 
-      // Voice detection test
-      const isCurrentFrameVoice = this.isUserSpeaking
-        ? (rms >= speechSustainThreshold || peak >= speechSustainPeak)
-        : (rms >= speechOnsetThreshold || peak >= speechPeakThreshold);
-
+      // Voice detection test for speech state tracking & visual feedback
+      const isCurrentFrameVoice = rms >= speechSustainThreshold || peak >= speechSustainPeak;
       const base64Chunk = this.float32ToPcm16Base64(inputBuffer);
 
       if (isCurrentFrameVoice) {
         this.consecutiveSpeechFrames++;
         this.lastSpeechTime = now;
 
-        // Instant onset: start immediately on 1 frame if clear voice, or 2 frames (~256ms)
-        const isClearVoice = rms >= speechOnsetThreshold * 1.2 || peak >= speechPeakThreshold * 1.2;
-        const requiredFrames = isClearVoice ? 1 : 2;
-
-        if (!this.isUserSpeaking && this.consecutiveSpeechFrames >= requiredFrames) {
+        if (!this.isUserSpeaking && this.consecutiveSpeechFrames >= 1) {
           this.isUserSpeaking = true;
           if (this.onSpeechStateChange) {
             this.onSpeechStateChange(true);
           }
-          // Flush pre-roll buffer so the very first syllable ("I...", "The...", "He...") is NEVER cut off!
-          if (this.onDataCallback) {
-            for (const preChunk of this.preRollBuffer) {
-              this.onDataCallback(preChunk);
-            }
-          }
-          this.preRollBuffer = [];
-        }
-
-        // Send active voice frame directly into Gemini Live in real-time
-        if (this.isUserSpeaking && this.onDataCallback) {
-          this.onDataCallback(base64Chunk);
         }
       } else {
         this.consecutiveSpeechFrames = 0;
-
         if (this.isUserSpeaking) {
           const silenceDuration = now - this.lastSpeechTime;
-
-          if (silenceDuration < this.silenceWaitMs) {
-            // User paused briefly (thinking or taking breath): continue streaming
-            if (this.onDataCallback) {
-              this.onDataCallback(base64Chunk);
-            }
-          } else {
-            // Silence window reached: user has finished speaking! Promptly notify turn completion
+          if (silenceDuration >= this.silenceWaitMs) {
             this.isUserSpeaking = false;
             if (this.onSpeechStateChange) {
               this.onSpeechStateChange(false);
@@ -416,20 +431,14 @@ export class LiveAudioRecorder {
             if (this.onTurnComplete) {
               this.onTurnComplete();
             }
-            if (this.onSilenceFiltered) {
-              this.onSilenceFiltered();
-            }
-          }
-        } else {
-          // Keep circular pre-roll buffer of last 5 frames (~640ms)
-          this.preRollBuffer.push(base64Chunk);
-          if (this.preRollBuffer.length > 5) {
-            this.preRollBuffer.shift();
-          }
-          if (this.onSilenceFiltered) {
-            this.onSilenceFiltered();
           }
         }
+      }
+
+      // CRITICAL REAL-TIME STREAMING: Stream every live audio frame immediately to Gemini Live!
+      // Zero pre-roll delay, zero burst buffering, zero dropped words.
+      if (this.onDataCallback) {
+        this.onDataCallback(base64Chunk);
       }
     };
   }
@@ -444,9 +453,9 @@ export class LiveAudioRecorder {
 
     const bytes = new Uint8Array(buffer);
     let binary = '';
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize) as any);
     }
     return btoa(binary);
   }

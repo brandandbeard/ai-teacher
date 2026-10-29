@@ -91,6 +91,15 @@ export class ConversationStateMachine {
     this.notify();
   }
 
+  public setTopic(topic: string) {
+    this.context.currentTopic = topic;
+    this.context.isLessonStarted = true;
+    if (!this.context.topicHistory.includes(topic)) {
+      this.context.topicHistory.push(topic);
+    }
+    this.notify();
+  }
+
   public isWaitingForStudent(): boolean {
     return this.context.conversationState === 'WAITING_FOR_STUDENT' || Boolean(this.context.pendingQuestion);
   }
@@ -300,17 +309,50 @@ export class ConversationStateMachine {
         identifiedTopic = 'Cell Division / Photosynthesis (Life Science)';
       } else if (/আলো|optics|light/i.test(text)) {
         identifiedTopic = 'আলো (Light)';
-      } else if (/চলতড়িৎ|electricity/i.test(text)) {
+      } else if (/চলতড়িৎ|electricity|ওহম|ohm/i.test(text)) {
         identifiedTopic = 'চলতড়িৎ (Current Electricity)';
       } else if (/পলাশী|plassey/i.test(text)) {
         identifiedTopic = 'পলাশীর যুদ্ধ (Battle of Plassey)';
-      } else if (/মহাবিদ্রোহ|সিপাহী/i.test(text)) {
+      } else if (/মহাবিদ্রোহ|সিপাহী|1857|১৮৫৭/i.test(text)) {
         identifiedTopic = '১৮৫৭-র মহাবিদ্রোহ';
+      } else if (/সংবিধান|constitution|মৌলিক\s*অধিকার|fundamental\s*rights|preamble|প্রস্তাবনা/i.test(text)) {
+        identifiedTopic = 'Indian Constitution & Fundamental Rights';
+      } else if (/অর্থনীতি|economy|rbi|মুদ্রাস্ফীতি|inflation|gdp/i.test(text)) {
+        identifiedTopic = 'Indian Economy & Banking System';
+      } else if (/মুঘল|mughal|বাবর|আকবর|সুলতানি|sultanate/i.test(text)) {
+        identifiedTopic = 'Mughal Empire & Medieval India';
+      } else if (/সিন্ধু|হরপ্পা|indus|harappa/i.test(text)) {
+        identifiedTopic = 'Indus Valley Civilization & Ancient India';
+      } else if (/নদী|হিমবাহ|বায়ুমণ্ডল|climate|glacier/i.test(text)) {
+        identifiedTopic = 'ভূগোল ও প্রাকৃতিক ভূমিরূপ';
       }
     } else {
-      if (lower.includes('interview')) identifiedTopic = 'Job Interview & Formal Intro Practice';
-      else if (lower.includes('travel') || lower.includes('flight')) identifiedTopic = 'Travel, Airport & Daily Routine Conversation';
-      else if (lower.includes('story') || lower.includes('narrative')) identifiedTopic = 'Story Building & Picture Narrative Drill';
+      if (lower.includes('email') || lower.includes('workplace') || lower.includes('business')) {
+        identifiedTopic = 'Professional Workplace Email Writing & Polite Business Dialogue';
+      } else if (lower.includes('idiom') || lower.includes('phrasal')) {
+        identifiedTopic = 'Everyday Idioms & Phrasal Verbs in Smart Conversations';
+      } else if (lower.includes('interview') || lower.includes('intro')) {
+        identifiedTopic = 'Mastering Job Interview Responses: Self Intro & Goals';
+      } else if (lower.includes('travel') || lower.includes('flight') || lower.includes('airport')) {
+        identifiedTopic = 'Travel, Airport & Daily Routine Conversation';
+      } else if (lower.includes('story') || lower.includes('narrative')) {
+        identifiedTopic = 'Story Building & Picture Narrative Drill';
+      } else if (lower.includes('hesitation') || lower.includes('fluency') || lower.includes('speaking')) {
+        identifiedTopic = 'Overcoming Hesitation & Fast Turn-Taking';
+      } else if (lower.includes('grammar') || lower.includes('tense') || lower.includes('preposition')) {
+        identifiedTopic = 'Common Grammatical Traps & Tense Flaws';
+      }
+    }
+
+    // Direct topic extraction if user explicitly says "Topic: X", "Explain X", "Let's study X", "আমার টপিক X"
+    if (!identifiedTopic) {
+      const explicitTopicMatch = text.match(/(?:topic|টপিক|বিষয়|বিষয়|chapter|অধ্যায়|learn|study|explain|পড়াও|আলোচনা\s*করো)\s*[:：\-]?\s*([A-Za-z0-9\s\u0980-\u09FF\-\'’]{3,40})/i);
+      if (explicitTopicMatch && explicitTopicMatch[1]) {
+        const candidate = explicitTopicMatch[1].trim();
+        if (candidate.length >= 3 && !/^(করো|বলো|দাও|হবে|please|now)$/i.test(candidate)) {
+          identifiedTopic = candidate;
+        }
+      }
     }
 
     // If currently in translation drill, student input is an answer
@@ -351,6 +393,7 @@ export class ConversationStateMachine {
       if (!this.context.conceptsCovered.includes(identifiedTopic)) {
         this.context.conceptsCovered.push(identifiedTopic);
       }
+      this.notify();
     }
 
     const isTopicSwitch = Boolean(

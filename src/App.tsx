@@ -139,7 +139,7 @@ export default function App() {
     audioRecorderRef.current?.setSilenceWaitMs(Math.round(silenceWait * 1000));
   }, [silenceWait]);
 
-  // Initialize Audio Player on mount
+  // Initialize Audio Player and Subscribe to State Machine on mount
   useEffect(() => {
     audioPlayerRef.current = new LiveAudioPlayer();
     audioPlayerRef.current.setPlaybackRate(speechSpeed);
@@ -151,7 +151,13 @@ export default function App() {
       return audioPlayerRef.current?.isPlaying() || false;
     });
 
+    // Subscribe to state machine for real-time topic updates next to Voice indicator
+    const unsubscribe = conversationStateMachine.subscribe((ctx) => {
+      setActiveContext(ctx);
+    });
+
     return () => {
+      unsubscribe();
       stopCall();
       audioPlayerRef.current?.close();
       audioRecorderRef.current?.stop();
@@ -418,7 +424,7 @@ export default function App() {
 
           if (msg.type === 'interrupted') {
             clearInactivityTimer();
-            const userWasActuallySpeaking = audioRecorderRef.current?.isSpeaking();
+            const userWasActuallySpeaking = !isMicMuted && !!audioRecorderRef.current?.isSpeaking();
             if (userWasActuallySpeaking) {
               audioPlayerRef.current?.stopAndClear();
               conversationStateMachine.transitionTo('PROCESSING_INPUT');
@@ -427,9 +433,9 @@ export default function App() {
               addTranscript('system', 'AI interrupted by user');
               setTimeout(() => setCallStatus('active'), 1200);
             } else {
-              // Spurious server interruption while user is silent (e.g. room echo or network lag).
+              // Spurious server interruption while user is silent or mic is muted.
               // Do NOT dump the audio buffer so the AI voice plays completely without cutting off!
-              console.log('[App] Ignored server interruption event because user is not speaking.');
+              console.log('[App] Ignored server interruption event because user is not speaking or mic is muted.');
             }
           }
 
@@ -756,7 +762,10 @@ export default function App() {
     // Clear old session resume handle so previous subject never bleeds in
     lastResumptionHandleRef.current = null;
     conversationStateMachine.setResumptionHandle(null);
+    const initialTopic = conversationStateMachine.pickRandomTopic(subjectName, cls);
     conversationStateMachine.setTeachingMode(teachingMode, cls, subjectName);
+    conversationStateMachine.setTopic(initialTopic);
+    setActiveContext(conversationStateMachine.getContext());
   };
 
   const handleSelectWbbseSubject = (subj: 'science' | 'history' | 'geography') => {
@@ -772,7 +781,10 @@ export default function App() {
     setVoice(defaultVoice);
     setSystemInstruction(prompt);
     conversationStateMachine.updatePersona(prompt);
+    const initialTopic = conversationStateMachine.pickRandomTopic(subjectName, selectedClass || 'Class 10');
     conversationStateMachine.setTeachingMode(teachingMode, selectedClass, subjectName);
+    conversationStateMachine.setTopic(initialTopic);
+    setActiveContext(conversationStateMachine.getContext());
   };
 
   const handleSelectCompetitiveSubject = (compSubj: typeof COMPETITIVE_SUBJECTS[0]) => {
@@ -786,7 +798,10 @@ export default function App() {
     setSystemInstruction(compSubj.prompt);
     conversationStateMachine.updatePersona(compSubj.prompt);
     // Explicitly pass undefined for classGrade so school class never attaches to competitive/spoken
+    const initialTopic = conversationStateMachine.pickRandomTopic(compSubj.title);
     conversationStateMachine.setTeachingMode(teachingMode, undefined, compSubj.title);
+    conversationStateMachine.setTopic(initialTopic);
+    setActiveContext(conversationStateMachine.getContext());
   };
 
   const handleSelectMode = (mode: TeachingMode) => {
@@ -880,7 +895,7 @@ export default function App() {
   const selectedVoiceMeta = VOICES.find((v) => v.id === voice) || VOICES[0];
 
   return (
-    <div className="flex min-h-dvh h-dvh w-full max-w-full flex-col bg-slate-950 text-slate-100 overflow-x-hidden overflow-y-hidden font-sans">
+    <div className="flex min-h-screen w-full max-w-full flex-col bg-slate-950 text-slate-100 overflow-x-hidden font-sans">
       {/* Top Navigation Bar */}
       <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-slate-800/80 px-3 sm:px-6 bg-slate-950/70 backdrop-blur-md z-30">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -983,9 +998,9 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden relative w-full max-w-full">
+      <div className="flex flex-1 relative w-full max-w-full min-h-0">
         {/* Left Side: Call Stage / Visualizer */}
-        <div className="flex-1 flex flex-col justify-between p-3 sm:p-6 overflow-y-auto overflow-x-hidden w-full max-w-full">
+        <div className="flex-1 flex flex-col justify-between p-2.5 sm:p-6 overflow-y-auto overflow-x-hidden w-full max-w-full min-h-0">
           {/* Quick Info Bar */}
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 w-full max-w-full mb-2">
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5 max-w-full">
@@ -995,15 +1010,22 @@ export default function App() {
                   {model === 'gemini-3.8-live' ? 'Model 1' : 'Model 2'}
                 </span>
               </span>
-              <span className="flex items-center gap-1.5 bg-slate-900/80 px-2 py-1 rounded-md border border-slate-800 text-[11px] sm:text-xs">
-                <Volume2 className="h-3.5 w-3.5 text-cyan-400" />
+              <span className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800 text-[11px] sm:text-xs">
+                <Volume2 className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
                 <span>Voice:</span>
-                <strong className="text-white">{voice}</strong>
+                <strong className="text-white font-mono">{voice}</strong>
               </span>
-              {activeContext.currentTopic && (
-                <span className="flex items-center gap-1.5 bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 px-2 py-1 rounded-md text-[11px] sm:text-xs">
+              {activeContext.currentTopic ? (
+                <span className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-950/90 to-slate-900/90 border border-emerald-500/50 text-emerald-200 px-2.5 py-1 rounded-md text-[11px] sm:text-xs shadow-sm max-w-[170px] sm:max-w-[320px]">
                   <BookOpen className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                  <span className="font-semibold truncate max-w-[110px] sm:max-w-[200px]">{activeContext.currentTopic}</span>
+                  <span className="font-bold truncate text-emerald-100" title={activeContext.currentTopic}>
+                    {activeContext.currentTopic}
+                  </span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-md text-[11px] sm:text-xs">
+                  <BookOpen className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                  <span className="truncate">টপিক নির্বাচন করুন</span>
                 </span>
               )}
               <button
@@ -1422,26 +1444,26 @@ export default function App() {
               )}
 
               {/* Quick Action Touch Buttons directly above Chat Input */}
-              <div className="w-full max-w-xl flex items-center justify-between gap-1 sm:gap-2 px-0.5">
+              <div className="w-full max-w-xl grid grid-cols-3 gap-1.5 sm:gap-2 px-0.5">
                 <button
                   type="button"
                   onClick={handleNextClick}
-                  className="flex-1 py-1.5 px-2 rounded-xl border border-cyan-500/40 bg-cyan-950/50 hover:bg-cyan-900/60 active:scale-95 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm transition-all"
+                  className="w-full py-2 px-1 sm:px-2 rounded-xl border border-cyan-500/40 bg-cyan-950/50 hover:bg-cyan-900/60 active:scale-95 text-cyan-200 text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 shadow-sm transition-all min-w-0"
                   title="পরের বিষয় বা প্রশ্ন"
                 >
-                  <span>⏭️</span>
-                  <span className="truncate">Next (পরের বিষয়)</span>
+                  <span className="text-sm sm:text-xs shrink-0">⏭️</span>
+                  <span className="truncate text-center">Next (পরের বিষয়)</span>
                 </button>
                 <button
                   type="button"
                   onClick={() =>
                     sendQuickActionMessage('আগের বিষয়টি আরেকবার সহজ করে সুন্দরভাবে বুঝিয়ে দাও')
                   }
-                  className="flex-1 py-1.5 px-2 rounded-xl border border-amber-500/40 bg-amber-950/50 hover:bg-amber-900/60 active:scale-95 text-amber-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm transition-all"
+                  className="w-full py-2 px-1 sm:px-2 rounded-xl border border-amber-500/40 bg-amber-950/50 hover:bg-amber-900/60 active:scale-95 text-amber-200 text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 shadow-sm transition-all min-w-0"
                   title="আবার সুন্দর করে বোঝাও"
                 >
-                  <span>🔁</span>
-                  <span className="truncate">Repeat (আবার বলো)</span>
+                  <span className="text-sm sm:text-xs shrink-0">🔁</span>
+                  <span className="truncate text-center">Repeat (আবার বলো)</span>
                 </button>
                 <button
                   type="button"
@@ -1452,11 +1474,11 @@ export default function App() {
                         : 'এই বিষয়টি আরেকটু গভীরে গিয়ে উদাহরণসহ বুঝিয়ে দাও'
                     )
                   }
-                  className="flex-1 py-1.5 px-2 rounded-xl border border-purple-500/40 bg-purple-950/50 hover:bg-purple-900/60 active:scale-95 text-purple-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm transition-all"
+                  className="w-full py-2 px-1 sm:px-2 rounded-xl border border-purple-500/40 bg-purple-950/50 hover:bg-purple-900/60 active:scale-95 text-purple-200 text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 shadow-sm transition-all min-w-0"
                   title="আরও বিস্তারিত তথ্য"
                 >
-                  <span>❓</span>
-                  <span className="truncate">Detail (আরও বলো)</span>
+                  <span className="text-sm sm:text-xs shrink-0">❓</span>
+                  <span className="truncate text-center">Detail (আরও বলো)</span>
                 </button>
               </div>
 

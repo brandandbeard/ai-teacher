@@ -297,4 +297,28 @@ test('Scenario Q: Hard translation drill detection locks state and treats studen
   assert.equal(sm.getContext().currentTopic, 'Bengali to English Hard Translation Drill');
 });
 
+test('Scenario R: Dynamic topic badge update when user mentions topics like Professional Workplace Email Writing', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(SHREYA_MAAM_PROMPT);
+  sm.setTeachingMode('lecture', undefined, 'Spoken English');
+
+  let notifiedTopic: string | null = null;
+  const unsubscribe = sm.subscribe((ctx) => {
+    notifiedTopic = ctx.currentTopic;
+  });
+
+  // Student mentions Workplace Email Writing
+  const intent = sm.processStudentInput('I want to learn professional workplace email writing');
+  assert.equal(intent.type, 'TOPIC_SWITCH');
+  assert.equal(sm.getContext().currentTopic, 'Professional Workplace Email Writing & Polite Business Dialogue');
+  assert.equal(notifiedTopic, 'Professional Workplace Email Writing & Polite Business Dialogue');
+
+  // Student mentions Idioms
+  sm.processStudentInput('Teach me everyday idioms and phrasal verbs');
+  assert.equal(sm.getContext().currentTopic, 'Everyday Idioms & Phrasal Verbs in Smart Conversations');
+  assert.equal(notifiedTopic, 'Everyday Idioms & Phrasal Verbs in Smart Conversations');
+
+  unsubscribe();
+});
+
 
