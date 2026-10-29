@@ -122,13 +122,18 @@ export class ConversationStateMachine {
     console.log(`[ConversationStateMachine] Switching persona to ${personaId} (${personaTitle})`);
     this.context.personaId = personaId;
     this.context.personaTitle = personaTitle;
-    this.context.subject = subject || this.context.subject;
+    this.context.subject = subject || (personaId === 'shreya-maam' ? 'Spoken English' : this.context.subject);
+    this.context.classGrade = (personaId === 'shreya-maam' || personaId.includes('sir')) ? undefined : this.context.classGrade;
+    this.context.className = this.context.classGrade;
+    this.context.chapter = undefined;
     this.context.currentTopic = null;
     this.context.pendingQuestion = undefined;
     this.context.turnCount = 0;
     this.context.turnsCompleted = 0;
     this.context.conceptsCovered = [];
     this.context.topicHistory = [];
+    this.context.lastCompletedConcept = undefined;
+    this.context.lastStudentInput = undefined;
     this.context.isLessonStarted = false;
     this.notify();
   }
@@ -208,64 +213,114 @@ export class ConversationStateMachine {
       };
     }
 
-    // Extract class info if mentioned
-    const classMatch =
-      text.match(/class\s*(v|vi|vii|viii|ix|x|5|6|7|8|9|10)/i) ||
-      text.match(/(পঞ্চম|ষষ্ঠ|সপ্তম|অষ্টম|নবম|দশম|\d+)\s*শ্রেণি/i) ||
-      text.match(/ক্লাস\s*(\d+|১০|৯|৮|৭|৬|৫)/i);
+    const isSpokenEnglish = this.context.personaId === 'shreya-maam' || this.context.subject === 'Spoken English';
+    const isCompetitive = ['history-sir', 'polity-sir', 'economy-sir'].includes(this.context.personaId);
 
-    if (classMatch) {
-      let cls = classMatch[0].trim();
-      if (/10|x|দশম|১০/i.test(cls)) cls = 'Class 10';
-      else if (/9|ix|নবম|৯/i.test(cls)) cls = 'Class 9';
-      else if (/8|viii|অষ্টম|৮/i.test(cls)) cls = 'Class 8';
-      else if (/7|vii|সপ্তম|৭/i.test(cls)) cls = 'Class 7';
-      else if (/6|vi|ষষ্ঠ|৬/i.test(cls)) cls = 'Class 6';
-      else if (/5|v|পঞ্চম|৫/i.test(cls)) cls = 'Class 5';
-      this.context.classGrade = cls;
+    // Check for translation request (Bengali to English translation drill)
+    const isTranslationRequest =
+      lower.includes('translation') ||
+      lower.includes('traslation') ||
+      lower.includes('অনুবাদ') ||
+      lower.includes('translat') ||
+      (lower.includes('bangla') && lower.includes('english')) ||
+      (lower.includes('বাংলা') && lower.includes('ইংরেজি')) ||
+      lower.includes('tell me in bangla');
+
+    if (isTranslationRequest) {
+      this.context.currentTopic = 'Bengali to English Hard Translation Drill';
+      this.context.teachingMode = 'quiz';
+      this.context.teachingModeLabel = 'অনুবাদ অনুশীলন';
+      this.context.classGrade = undefined;
+      this.context.className = undefined;
+      this.context.subject = 'Spoken English';
+      this.context.isLessonStarted = true;
+      if (!this.context.topicHistory.includes(this.context.currentTopic)) {
+        this.context.topicHistory.push(this.context.currentTopic);
+      }
+      this.transitionTo('SWITCHING_TOPIC', 'Switched to Bengali to English Translation Drill');
+      return {
+        type: 'TOPIC_SWITCH',
+        extractedTopic: this.context.currentTopic,
+        toString() { return 'TOPIC_SWITCH'; }
+      };
     }
 
-    // Extract subject info if mentioned
-    if (/ভৌত\s*বিজ্ঞান|physical\s*science/i.test(text)) {
-      this.context.subject = 'Physical Science (ভৌতবিজ্ঞান)';
-    } else if (/জীবন\s*বিজ্ঞান|life\s*science|biology/i.test(text)) {
-      this.context.subject = 'Life Science (জীবনবিজ্ঞান)';
-    } else if (/ইতিহাস|history/i.test(text)) {
-      this.context.subject = 'WBBSE History';
-    } else if (/ভূগোল|geography/i.test(text)) {
-      this.context.subject = 'WBBSE Geography';
-    }
+    // Extract class info if mentioned (only for WBBSE school personas)
+    if (!isSpokenEnglish && !isCompetitive) {
+      const classMatch =
+        text.match(/class\s*(v|vi|vii|viii|ix|x|5|6|7|8|9|10)/i) ||
+        text.match(/(পঞ্চম|ষষ্ঠ|সপ্তম|অষ্টম|নবম|দশম|\d+)\s*শ্রেণি/i) ||
+        text.match(/ক্লাস\s*(\d+|১০|৯|৮|৭|৬|৫)/i);
 
-    // Extract chapter info if mentioned
-    const chapterMatch =
-      text.match(/(chapter|অধ্যায়|চ্যাপ্টার)\s*(\d+|[a-z]+|২|১|৩|৪|৫|৬)/i) ||
-      text.match(/(\d+|দ্বিতীয়|প্রথম|তৃতীয়)\s*(নম্বর\s*)?(অধ্যায়|চ্যাপ্টার)/i);
-    if (chapterMatch) {
-      let ch = chapterMatch[0].trim();
-      if (/দ্বিতীয়|২|2/i.test(ch)) ch = 'অধ্যায় ২';
-      else if (/প্রথম|১|1/i.test(ch)) ch = 'অধ্যায় ১';
-      else if (/তৃতীয়|৩|3/i.test(ch)) ch = 'অধ্যায় ৩';
-      this.context.chapter = ch;
+      if (classMatch) {
+        let cls = classMatch[0].trim();
+        if (/10|x|দশম|১০/i.test(cls)) cls = 'Class 10';
+        else if (/9|ix|নবম|৯/i.test(cls)) cls = 'Class 9';
+        else if (/8|viii|অষ্টম|৮/i.test(cls)) cls = 'Class 8';
+        else if (/7|vii|সপ্তম|৭/i.test(cls)) cls = 'Class 7';
+        else if (/6|vi|ষষ্ঠ|৬/i.test(cls)) cls = 'Class 6';
+        else if (/5|v|পঞ্চম|৫/i.test(cls)) cls = 'Class 5';
+        this.context.classGrade = cls;
+      }
+
+      // Extract subject info if mentioned
+      if (/ভৌত\s*বিজ্ঞান|physical\s*science/i.test(text)) {
+        this.context.subject = 'Physical Science (ভৌতবিজ্ঞান)';
+      } else if (/জীবন\s*বিজ্ঞান|life\s*science|biology/i.test(text)) {
+        this.context.subject = 'Life Science (জীবনবিজ্ঞান)';
+      } else if (/ইতিহাস|history/i.test(text)) {
+        this.context.subject = 'WBBSE History';
+      } else if (/ভূগোল|geography/i.test(text)) {
+        this.context.subject = 'WBBSE Geography';
+      }
+
+      // Extract chapter info if mentioned
+      const chapterMatch =
+        text.match(/(chapter|অধ্যায়|চ্যাপ্টার)\s*(\d+|[a-z]+|২|১|৩|৪|৫|৬)/i) ||
+        text.match(/(\d+|দ্বিতীয়|প্রথম|তৃতীয়)\s*(নম্বর\s*)?(অধ্যায়|চ্যাপ্টার)/i);
+      if (chapterMatch) {
+        let ch = chapterMatch[0].trim();
+        if (/দ্বিতীয়|২|2/i.test(ch)) ch = 'অধ্যায় ২';
+        else if (/প্রথম|১|1/i.test(ch)) ch = 'অধ্যায় ১';
+        else if (/তৃতীয়|৩|3/i.test(ch)) ch = 'অধ্যায় ৩';
+        this.context.chapter = ch;
+      }
     }
 
     // Extract topic
     let identifiedTopic: string | null = null;
-    if (/বয়েল|boyle/i.test(text)) {
-      identifiedTopic = "Boyle's Law & Gas Behavior";
-    } else if (/চার্লস|charles/i.test(text)) {
-      identifiedTopic = "Charles's Law & Absolute Zero";
-    } else if (/অ্যাভোগাড্রো|avogadro/i.test(text)) {
-      identifiedTopic = "Avogadro's Hypothesis";
-    } else if (/কোষ|cell|সালোকসংশ্লেষ|photosynthesis/i.test(text)) {
-      identifiedTopic = 'Cell Division / Photosynthesis (Life Science)';
-    } else if (/আলো|optics|light/i.test(text)) {
-      identifiedTopic = 'আলো (Light)';
-    } else if (/চলতড়িৎ|electricity/i.test(text)) {
-      identifiedTopic = 'চলতড়িৎ (Current Electricity)';
-    } else if (/পলাশী|plassey/i.test(text)) {
-      identifiedTopic = 'পলাশীর যুদ্ধ (Battle of Plassey)';
-    } else if (/মহাবিদ্রোহ|সিপাহী/i.test(text)) {
-      identifiedTopic = '১৮৫৭-র মহাবিদ্রোহ';
+    if (!isSpokenEnglish) {
+      if (/বয়েল|boyle/i.test(text)) {
+        identifiedTopic = "Boyle's Law & Gas Behavior";
+      } else if (/চার্লস|charles/i.test(text)) {
+        identifiedTopic = "Charles's Law & Absolute Zero";
+      } else if (/অ্যাভোগাড্রো|avogadro/i.test(text)) {
+        identifiedTopic = "Avogadro's Hypothesis";
+      } else if (/কোষ|cell|সালোকসংশ্লেষ|photosynthesis/i.test(text)) {
+        identifiedTopic = 'Cell Division / Photosynthesis (Life Science)';
+      } else if (/আলো|optics|light/i.test(text)) {
+        identifiedTopic = 'আলো (Light)';
+      } else if (/চলতড়িৎ|electricity/i.test(text)) {
+        identifiedTopic = 'চলতড়িৎ (Current Electricity)';
+      } else if (/পলাশী|plassey/i.test(text)) {
+        identifiedTopic = 'পলাশীর যুদ্ধ (Battle of Plassey)';
+      } else if (/মহাবিদ্রোহ|সিপাহী/i.test(text)) {
+        identifiedTopic = '১৮৫৭-র মহাবিদ্রোহ';
+      }
+    } else {
+      if (lower.includes('interview')) identifiedTopic = 'Job Interview & Formal Intro Practice';
+      else if (lower.includes('travel') || lower.includes('flight')) identifiedTopic = 'Travel, Airport & Daily Routine Conversation';
+      else if (lower.includes('story') || lower.includes('narrative')) identifiedTopic = 'Story Building & Picture Narrative Drill';
+    }
+
+    // If currently in translation drill, student input is an answer
+    if (this.context.currentTopic?.toLowerCase().includes('translation') || this.context.teachingModeLabel === 'অনুবাদ অনুশীলন') {
+      this.transitionTo('PROCESSING_INPUT', 'Student answered translation drill');
+      return {
+        type: 'ANSWER',
+        extractedTopic: this.context.currentTopic || undefined,
+        toString() { return 'ANSWER'; }
+      };
     }
 
     // If answer to checkpoint question
@@ -432,10 +487,8 @@ export class ConversationStateMachine {
   public setTeachingMode(mode: TeachingMode, classGrade?: string, subject?: string) {
     this.context.teachingMode = mode;
     this.context.teachingModeLabel = mode === 'lecture' ? 'আলোচনা' : mode === 'doubts' ? 'AI কে প্রশ্ন' : 'প্রশ্ন উত্তর';
-    if (classGrade) {
-      this.context.classGrade = classGrade;
-      this.context.className = classGrade;
-    }
+    this.context.classGrade = classGrade;
+    this.context.className = classGrade;
     if (subject) {
       this.context.subject = subject;
     }
@@ -450,6 +503,39 @@ export class ConversationStateMachine {
     const mode = this.context.teachingMode || 'lecture';
     const cls = this.context.classGrade || 'WBBSE';
     const subj = this.context.subject || 'বিজ্ঞান';
+    const isSpoken = this.context.personaId === 'shreya-maam' || this.context.subject === 'Spoken English';
+    const isTranslation = this.context.currentTopic?.toLowerCase().includes('translation') || this.context.teachingModeLabel === 'অনুবাদ অনুশীলন';
+
+    if (isTranslation) {
+      return [
+        '【সক্রিয় মোড: বাংলা থেকে ইংরেজি অনুবাদ ড্রিল (BENGALI TO ENGLISH HARD TRANSLATION DRILL)】',
+        '- শিক্ষক একটি করে বাংলা বাক্য বলবেন (চ্যালেঞ্জিং/দৈনন্দিন প্র্যাকটিক্যাল বাক্য)।',
+        '- ছাত্র সেই বাক্যটি ইংরেজিতে মুখে বলবে বা চ্যাটে লিখে পাঠাবে।',
+        '- ছাত্র উত্তর দিলে শিক্ষক সংক্ষেপে ১ লাইনে মূল্যায়ন করবেন (সঠিক হলে প্রশংসা করবেন, ভুল বা দুর্বল গ্রামার থাকলে সঠিক English রূপটি শিখিয়ে দেবেন)।',
+        '- এরপর বিলম্ব না করে ছাত্রকে অনুবাদ করার জন্য পরবর্তী নতুন বাংলা বাক্যটি বলবেন ("এবার বলুন: ...")।',
+        '- কোনো অযথা লম্বা বক্তৃতা বা পুরানো কোনো টপিকে ফিরে যাওয়া কঠোরভাবে নিষিদ্ধ। শুধুমাত্র একটি করে বাংলা বাক্য দেবেন এবং ছাত্রের ইংরেজি অনুবাদ নেবেন।',
+      ].join('\n');
+    }
+
+    if (isSpoken) {
+      if (mode === 'lecture') {
+        return [
+          '【সক্রিয় মোড: Spoken English আলোচনা ও গাইডেন্স】',
+          '- শিক্ষক শ্রেয়া ম্যাডাম হিসেবে ব্যবহারিক স্পোকেন ইংলিশ, স্বাভাবিক কথোপকথন এবং প্রয়োজনীয় ব্যাকরণ/উচ্চারণ সাবলীল বাংলা ও ইংরেজিতে বুঝিয়ে দিন।',
+          '- কোনো অবস্থাতেই স্কুলের বিজ্ঞান বা ইতিহাসের পাঠ আনবেন না। এটি সম্পূর্ণ স্পোকেন ইংলিশের সেশন।',
+        ].join('\n');
+      }
+      if (mode === 'doubts') {
+        return [
+          '【সক্রিয় মোড: Spoken English ডাউট ক্লিয়ারিং】',
+          '- ছাত্রের ইংরেজি কথা বলা, গ্রামার বা ভোকাবুলারি সংক্রান্ত যেকোনো প্রশ্নের সহজ-সরল উত্তর বুঝিয়ে দিন।',
+        ].join('\n');
+      }
+      return [
+        '【সক্রিয় মোড: Spoken English প্রশ্ন ও স্পিকিং টেস্ট】',
+        '- ছাত্রকে বাস্তব জীবনের কোনো পরিস্থিতিতে ইংরেজিতে কথা বলার প্রশ্ন বা বাক্য দিন এবং ছাত্রের উত্তরের জন্য অপেক্ষা করুন।',
+      ].join('\n');
+    }
 
     if (mode === 'lecture') {
       return [

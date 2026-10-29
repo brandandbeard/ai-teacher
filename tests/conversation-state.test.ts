@@ -258,3 +258,43 @@ test('Scenario O: Teaching mode selection — প্রশ্ন উত্তর
   assert.match(durable, /Selected Mode: প্রশ্ন উত্তর/);
 });
 
+test('Scenario P: Spoken English isolation prevents WBBSE subject bleed and clears Class 10', () => {
+  const sm = new ConversationStateMachine();
+  // First in WBBSE Class 10 Science
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  sm.setTeachingMode('lecture', 'Class 10', 'বিজ্ঞান');
+  assert.equal(sm.getContext().classGrade, 'Class 10');
+
+  // Now student switches to Spoken English
+  sm.updatePersona(SHREYA_MAAM_PROMPT);
+  sm.setTeachingMode('lecture', undefined, 'Spoken English');
+
+  assert.equal(sm.getContext().subject, 'Spoken English');
+  assert.equal(sm.getContext().classGrade, undefined);
+
+  // Student mentions "cell" in casual English conversation, should NOT trigger Life Science
+  sm.processStudentInput('My cell phone battery died');
+  assert.equal(sm.getContext().subject, 'Spoken English');
+});
+
+test('Scenario Q: Hard translation drill detection locks state and treats student response as ANSWER', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(SHREYA_MAAM_PROMPT);
+  sm.setTeachingMode('lecture', undefined, 'Spoken English');
+
+  // Student requests translation drill
+  const intent = sm.processStudentInput('hard traslation tell me in bangla i will tell in english');
+  assert.equal(intent.type, 'TOPIC_SWITCH');
+  assert.equal(sm.getContext().currentTopic, 'Bengali to English Hard Translation Drill');
+  assert.equal(sm.getContext().teachingModeLabel, 'অনুবাদ অনুশীলন');
+
+  const directive = sm.getTeachingModeDirective();
+  assert.match(directive, /BENGALI TO ENGLISH HARD TRANSLATION DRILL/);
+
+  // Next student input should be evaluated as an answer, not a topic switch
+  const answerIntent = sm.processStudentInput('I will read the book tomorrow');
+  assert.equal(answerIntent.type, 'ANSWER');
+  assert.equal(sm.getContext().currentTopic, 'Bengali to English Hard Translation Drill');
+});
+
+

@@ -509,9 +509,14 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
           let sysInstruction = message.systemInstruction ||
             "You are a friendly, highly capable real-time conversational AI. Keep spoken responses clear, lively, concise, and natural.";
 
-          // If a lesson was already ongoing and context summary has active topic, guarantee continuity:
+          // If a lesson was already ongoing and context summary has active topic, guarantee continuity without subject cross-contamination:
           if (contextSummary && contextSummary.currentTopic && !sysInstruction.includes("DURABLE ONGOING LESSON CONTEXT")) {
-            sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: Subject="${contextSummary.subject || 'WBBSE Science'}", Class="${contextSummary.classGrade || 'Class 10'}", Chapter="${contextSummary.chapter || ''}", Topic="${contextSummary.currentTopic}". DO NOT say any initial greeting or ask what to study. Immediately resume continuous teaching of this topic.]`;
+            const metaParts = [];
+            if (contextSummary.subject) metaParts.push(`Subject="${contextSummary.subject}"`);
+            if (contextSummary.classGrade) metaParts.push(`Class="${contextSummary.classGrade}"`);
+            if (contextSummary.chapter) metaParts.push(`Chapter="${contextSummary.chapter}"`);
+            metaParts.push(`Topic="${contextSummary.currentTopic}"`);
+            sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: ${metaParts.join(', ')}. Strictly teach ONLY this active subject and topic. DO NOT mix any other subject or say any initial greeting. Immediately resume continuous teaching of this topic.]`;
           }
 
           sessionParams = {

@@ -20,9 +20,7 @@ export class LiveAudioPlayer {
 
   public isPlaying(): boolean {
     if (!this.ctx) return false;
-    const isBufferPlaying = this.activeSources.length > 0 && this.nextStartTime > this.ctx.currentTime;
-    const isRecentChunk = Date.now() - this.lastChunkTime < 650;
-    return isBufferPlaying || isRecentChunk;
+    return this.activeSources.length > 0 && this.nextStartTime > this.ctx.currentTime;
   }
 
   public setPlaybackRate(rate: number) {
@@ -85,9 +83,9 @@ export class LiveAudioPlayer {
       source.connect(this.analyser);
 
       const currentTime = this.ctx.currentTime;
-      // Schedule gapless playback with a small 25ms jitter buffer
+      // Schedule gapless playback with a 60ms jitter buffer for smooth playback without pops
       if (this.nextStartTime < currentTime) {
-        this.nextStartTime = currentTime + 0.025;
+        this.nextStartTime = currentTime + 0.060;
       }
 
       source.start(this.nextStartTime);
@@ -167,13 +165,13 @@ export class LiveAudioRecorder {
 
   // Adaptive Voice Activity Detection parameters
   private vadEnabled = true;
-  private sensitivityLevel = 35; // 0 (Full Noise / Maximum suppression) to 100 (No Noise / Delicate sensitivity)
-  private silenceWaitMs = 1250; // User-requested silence threshold: exactly 1.25s
+  private sensitivityLevel = 50; // 0 (Full Noise / Maximum suppression) to 100 (No Noise / Delicate sensitivity)
+  private silenceWaitMs = 750; // Low-latency turn turnaround: 750ms
   private noiseFloor = 0.007; // Dynamic background noise floor
   private isUserSpeaking = false;
   private lastSpeechTime = 0;
   private consecutiveSpeechFrames = 0;
-  private preRollBuffer: string[] = []; // Circular buffer of last 2 frames (~250ms) before speech
+  private preRollBuffer: string[] = []; // Circular buffer of last 5 frames (~640ms) to guarantee zero clipped syllables
 
   // Acoustic Echo Shield & Anti-Interruption Guard
   private isAiSpeakingCallback: (() => boolean) | null = null;
@@ -337,31 +335,38 @@ export class LiveAudioRecorder {
       // norm: 0.0 = 0% (Full Noise - maximum suppression), 1.0 = 100% (No Noise - delicate quiet room)
       const norm = Math.max(0, Math.min(100, this.sensitivityLevel)) / 100;
 
-      // Base RMS onset: at 0% (Full Noise) = 0.070, at 50% = 0.038, at 100% (No Noise) = 0.012
-      const baseOnsetRms = 0.070 - norm * 0.058;
-      // Noise floor multiplier: at 0% = 2.0x, at 100% = 1.25x
-      const noiseMultiplier = 2.0 - norm * 0.75;
-      // Peak onset: at 0% = 0.22, at 50% = 0.15, at 100% = 0.08
-      const basePeakOnset = 0.22 - norm * 0.14;
+      // Realistic conversational speech thresholds (produces clear pickup without requiring loud yelling):
+      // at 0% (Full Noise): 0.035 RMS, at 50% (Balanced): 0.021 RMS, at 100% (Quiet Room): 0.008 RMS
+      const baseOnsetRms = 0.035 - norm * 0.027;
+      // Noise floor multiplier: 1.8x at 0% to 1.15x at 100%
+      const noiseMultiplier = 1.8 - norm * 0.65;
+      // Peak onset: 0.12 at 0% to 0.04 at 100%
+      const basePeakOnset = 0.12 - norm * 0.08;
 
       // 4. Acoustic Echo Shield:
-      // If AI is currently outputting voice through the speaker, raise the barrier so the AI's own audio
-      // doesn't loop back into the microphone and falsely interrupt itself!
+      // When AI is actively outputting speech through the speaker, suppress low acoustic bleed
+      // but immediately allow natural user voice / barge-in.
       const isAiSpeaking = this.echoGuardEnabled && (this.isAiSpeakingCallback ? this.isAiSpeakingCallback() : false);
-      const echoShieldRms = isAiSpeaking ? 2.5 : 1.0;
-      const echoShieldPeak = isAiSpeaking ? 1.6 : 1.0;
+      if (isAiSpeaking) {
+        // Suppress acoustic echo bleed (< 0.030 RMS). Normal user speech (>= 0.030 RMS or >= 0.14 peak) passes freely.
+        const isUserSpeakingOverAi = rms >= 0.030 || peak >= 0.14;
+        if (!isUserSpeakingOverAi) {
+          this.consecutiveSpeechFrames = 0;
+          this.isUserSpeaking = false;
+          return;
+        }
+      }
 
-      const speechOnsetThreshold = Math.max(baseOnsetRms * echoShieldRms, this.noiseFloor * noiseMultiplier * echoShieldRms);
-      const speechPeakThreshold = Math.max(basePeakOnset * echoShieldPeak, this.noiseFloor * 2.8 * echoShieldPeak);
+      const speechOnsetThreshold = Math.max(baseOnsetRms, this.noiseFloor * noiseMultiplier);
+      const speechPeakThreshold = Math.max(basePeakOnset, this.noiseFloor * 2.2);
 
-      const speechSustainThreshold = speechOnsetThreshold * 0.65;
-      const speechSustainPeak = speechPeakThreshold * 0.70;
+      const speechSustainThreshold = speechOnsetThreshold * 0.55;
+      const speechSustainPeak = speechPeakThreshold * 0.60;
 
-      // When starting to speak, REQUIRE BOTH RMS energy AND peak amplitude:
-      // (This completely eliminates false triggers from fan hiss or brief acoustic clicks)
+      // Voice detection test
       const isCurrentFrameVoice = this.isUserSpeaking
         ? (rms >= speechSustainThreshold || peak >= speechSustainPeak)
-        : (rms >= speechOnsetThreshold && peak >= speechPeakThreshold);
+        : (rms >= speechOnsetThreshold || peak >= speechPeakThreshold);
 
       const base64Chunk = this.float32ToPcm16Base64(inputBuffer);
 
@@ -369,16 +374,16 @@ export class LiveAudioRecorder {
         this.consecutiveSpeechFrames++;
         this.lastSpeechTime = now;
 
-        // Require 3 consecutive frames (~384ms) in noisy environments or during AI speech,
-        // or 2 frames (~256ms) in very quiet rooms
-        const requiredFrames = (norm > 0.6 && !isAiSpeaking) ? 2 : 3;
+        // Instant onset: start immediately on 1 frame if clear voice, or 2 frames (~256ms)
+        const isClearVoice = rms >= speechOnsetThreshold * 1.2 || peak >= speechPeakThreshold * 1.2;
+        const requiredFrames = isClearVoice ? 1 : 2;
 
-        if (!this.isUserSpeaking && (this.consecutiveSpeechFrames >= requiredFrames || peak >= 0.28)) {
+        if (!this.isUserSpeaking && this.consecutiveSpeechFrames >= requiredFrames) {
           this.isUserSpeaking = true;
           if (this.onSpeechStateChange) {
             this.onSpeechStateChange(true);
           }
-          // Flush pre-roll buffer so the first syllable isn't lost
+          // Flush pre-roll buffer so the very first syllable ("I...", "The...", "He...") is NEVER cut off!
           if (this.onDataCallback) {
             for (const preChunk of this.preRollBuffer) {
               this.onDataCallback(preChunk);
@@ -387,7 +392,7 @@ export class LiveAudioRecorder {
           this.preRollBuffer = [];
         }
 
-        // Send active voice frame only when user is genuinely speaking
+        // Send active voice frame directly into Gemini Live in real-time
         if (this.isUserSpeaking && this.onDataCallback) {
           this.onDataCallback(base64Chunk);
         }
@@ -403,7 +408,7 @@ export class LiveAudioRecorder {
               this.onDataCallback(base64Chunk);
             }
           } else {
-            // Silence window reached: user has finished speaking!
+            // Silence window reached: user has finished speaking! Promptly notify turn completion
             this.isUserSpeaking = false;
             if (this.onSpeechStateChange) {
               this.onSpeechStateChange(false);
@@ -416,9 +421,9 @@ export class LiveAudioRecorder {
             }
           }
         } else {
-          // Keep circular pre-roll buffer of last 2 quiet frames (~250ms)
+          // Keep circular pre-roll buffer of last 5 frames (~640ms)
           this.preRollBuffer.push(base64Chunk);
-          if (this.preRollBuffer.length > 2) {
+          if (this.preRollBuffer.length > 5) {
             this.preRollBuffer.shift();
           }
           if (this.onSilenceFiltered) {

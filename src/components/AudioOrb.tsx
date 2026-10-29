@@ -141,12 +141,15 @@ export const AudioOrb: React.FC<AudioOrbProps> = ({
   }, [status, userVolume, aiVolume, size]);
 
   return (
-    <div className="relative flex items-center justify-center select-none" style={{ width: size, height: size }}>
+    <div
+      className="relative flex items-center justify-center select-none max-w-full overflow-hidden"
+      style={{ width: size, height: size, maxWidth: '100vw' }}
+    >
       <canvas
         ref={canvasRef}
         width={size * 1.5}
         height={size * 1.5}
-        style={{ width: size * 1.5, height: size * 1.5 }}
+        style={{ width: '100%', height: '100%', maxWidth: '100vw', maxHeight: '100vw' }}
         className="pointer-events-none absolute"
       />
       {/* Central State indicator badge */}

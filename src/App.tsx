@@ -56,7 +56,7 @@ export default function App() {
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [model, setModel] = useState<'gemini-3.8-live' | 'gemini-3.8-live-extended-thinking'>('gemini-3.8-live');
   const [voice, setVoice] = useState<string>('Kore');
-  const [systemInstruction, setSystemInstruction] = useState<string>(SHREYA_MAAM_PROMPT);
+  const [systemInstruction, setSystemInstruction] = useState<string>(WBBSE_SCIENCE_PROMPT);
   const [backendHost] = useState<string>(() => getSavedBackendHost());
 
   // Conversation State Machine & Active Topic Context
@@ -88,9 +88,9 @@ export default function App() {
 
   // Speed & Sensitivity Controls
   const [speechSpeed, setSpeechSpeed] = useState<number>(1.0);
-  const [micSensitivity, setMicSensitivity] = useState<number>(30); // 0% (Full Noise / fan suppression) to 100% (No Noise / quiet room) - default 30%
+  const [micSensitivity, setMicSensitivity] = useState<number>(50); // Balanced 50% for realistic voice pickup
   const [echoShieldEnabled, setEchoShieldEnabled] = useState<boolean>(true); // Acoustic Echo Shield to prevent AI self-interruption
-  const [silenceWait, setSilenceWait] = useState<number>(1.25); // Silence pause wait time in seconds (Default 1.25s)
+  const [silenceWait, setSilenceWait] = useState<number>(0.75); // Fast turn completion in 750ms
 
   // Telemetry & UI
   const [callDuration, setCallDuration] = useState(0);
@@ -418,14 +418,19 @@ export default function App() {
 
           if (msg.type === 'interrupted') {
             clearInactivityTimer();
-            audioPlayerRef.current?.stopAndClear();
-            conversationStateMachine.transitionTo('PROCESSING_INPUT');
-            setCallStatus('interrupted');
-            setStatusMessage('Interrupted. Listening to you...');
-            if (audioRecorderRef.current?.isSpeaking()) {
+            const userWasActuallySpeaking = audioRecorderRef.current?.isSpeaking();
+            if (userWasActuallySpeaking) {
+              audioPlayerRef.current?.stopAndClear();
+              conversationStateMachine.transitionTo('PROCESSING_INPUT');
+              setCallStatus('interrupted');
+              setStatusMessage('Interrupted. Listening to you...');
               addTranscript('system', 'AI interrupted by user');
+              setTimeout(() => setCallStatus('active'), 1200);
+            } else {
+              // Spurious server interruption while user is silent (e.g. room echo or network lag).
+              // Do NOT dump the audio buffer so the AI voice plays completely without cutting off!
+              console.log('[App] Ignored server interruption event because user is not speaking.');
             }
-            setTimeout(() => setCallStatus('active'), 1200);
           }
 
           if (msg.type === 'turn_complete') {
@@ -780,13 +785,14 @@ export default function App() {
     setVoice(compSubj.voice);
     setSystemInstruction(compSubj.prompt);
     conversationStateMachine.updatePersona(compSubj.prompt);
-    conversationStateMachine.setTeachingMode(teachingMode, 'Competitive & Spoken', compSubj.title);
+    // Explicitly pass undefined for classGrade so school class never attaches to competitive/spoken
+    conversationStateMachine.setTeachingMode(teachingMode, undefined, compSubj.title);
   };
 
   const handleSelectMode = (mode: TeachingMode) => {
     setTeachingModeState(mode);
 
-    let cls: string;
+    let cls: string | undefined;
     let subjectName: string;
     let prompt: string;
     let defaultVoice: string;
@@ -797,7 +803,7 @@ export default function App() {
       prompt = selectedWbbseSubject === 'science' ? WBBSE_SCIENCE_PROMPT : selectedWbbseSubject === 'history' ? WBBSE_HISTORY_PROMPT : WBBSE_GEOGRAPHY_PROMPT;
       defaultVoice = selectedWbbseSubject === 'science' ? 'Kore' : 'Charon';
     } else {
-      cls = 'Competitive & Spoken';
+      cls = undefined;
       subjectName = selectedCompetitiveSubject;
       const found = COMPETITIVE_SUBJECTS.find((s) => s.title === selectedCompetitiveSubject) || COMPETITIVE_SUBJECTS[0];
       prompt = found.prompt;
@@ -815,14 +821,52 @@ export default function App() {
     // If call is already active, dynamically switch mode live:
     if (callStatus !== 'idle' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const modeText = mode === 'lecture'
-        ? `[মোড পরিবর্তন: আলোচনা]: এখন থেকে আমরা "আলোচনা" মোডে পড়াশোনা করব। কোনো অপ্রয়োজনীয় ভূমিকা ছাড়া ${cls} ${subjectName}-এর বিষয়বস্তু একটানা অনর্গল বিস্তারিতভাবে বাংলায় বুঝিয়ে যান।`
+        ? `[মোড পরিবর্তন: আলোচনা]: এখন থেকে আমরা "আলোচনা" মোডে পড়াশোনা করব। কোনো অপ্রয়োজনীয় ভূমিকা ছাড়া ${cls ? `${cls} ` : ''}${subjectName}-এর বিষয়বস্তু একটানা অনর্গল বিস্তারিতভাবে বাংলায় বুঝিয়ে যান।`
         : mode === 'doubts'
         ? `[মোড পরিবর্তন: AI কে প্রশ্ন]: এখন থেকে আমরা "AI কে প্রশ্ন" মোডে পড়াশোনা করব। আমার যেকোনো প্রশ্ন বা ডাউট শুনুন এবং বাংলায় সহজ করে বুঝিয়ে উত্তর দিন।`
-        : `[মোড পরিবর্তন: প্রশ্ন উত্তর]: এখন থেকে আমরা "প্রশ্ন উত্তর" মোডে পড়াশোনা করব। আপনি আমাকে ${cls} ${subjectName}-এর উপর একটি একটি করে প্রশ্ন/MCQ জিজ্ঞাসা করুন এবং আমি উত্তর দেব।`;
+        : `[মোড পরিবর্তন: প্রশ্ন উত্তর]: এখন থেকে আমরা "প্রশ্ন উত্তর" মোডে পড়াশোনা করব। আপনি আমাকে ${cls ? `${cls} ` : ''}${subjectName}-এর উপর একটি একটি করে প্রশ্ন/MCQ জিজ্ঞাসা করুন এবং আমি উত্তর দেব।`;
 
       addTranscript('user', `[মোড পরিবর্তন: ${modeLabel}]`);
       wsRef.current.send(JSON.stringify({ type: 'text', text: modeText }));
       setStatusMessage(`সক্রিয় মোড: ${modeLabel}`);
+    }
+  };
+
+  // Context-aware Next handler: maintains active translation drill or advances to next curriculum topic
+  const handleNextClick = () => {
+    const ctx = conversationStateMachine.getContext();
+    const isSpoken = ctx.personaId === 'shreya-maam' || ctx.subject === 'Spoken English';
+    const isTranslation =
+      ctx.currentTopic?.toLowerCase().includes('translation') ||
+      ctx.teachingModeLabel === 'অনুবাদ অনুশীলন' ||
+      ctx.lastStudentInput?.toLowerCase().includes('translation') ||
+      ctx.lastStudentInput?.toLowerCase().includes('অনুবাদ') ||
+      (ctx.lastStudentInput?.toLowerCase().includes('bangla') && ctx.lastStudentInput?.toLowerCase().includes('english'));
+
+    if (isTranslation) {
+      sendQuickActionMessage('দারুণ! পরের বাংলা বাক্যটি বলুন, আমি ইংরেজিতে অনুবাদ করব।');
+      return;
+    }
+
+    if (isSpoken) {
+      if (teachingMode === 'quiz') {
+        sendQuickActionMessage('পরের স্পোকেন ইংলিশ প্রশ্ন বা ইংরেজি অনুশীলনের বাক্যটি দিন।');
+      } else {
+        const nextTopic = conversationStateMachine.pickRandomTopic('Spoken English');
+        sendQuickActionMessage(`চমৎকার! এবার পরের টপিক "${nextTopic}" নিয়ে আলোচনা বা স্পিকিং প্র্যাকটিস শুরু করুন।`);
+      }
+      return;
+    }
+
+    if (teachingMode === 'quiz') {
+      sendQuickActionMessage('পরের প্রশ্নটি জিজ্ঞাসা করো');
+    } else {
+      const cls = selectedClass || 'Class 10';
+      const subj = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
+      const nextTopic = activeSection === 'wbbse'
+        ? conversationStateMachine.pickRandomTopic(subj, cls)
+        : conversationStateMachine.pickRandomTopic(selectedCompetitiveSubject);
+      sendQuickActionMessage(`এবার পরের বিষয় "${nextTopic}" নিয়ে বিশদে একটানা আলোচনা শুরু করো।`);
     }
   };
 
@@ -836,7 +880,7 @@ export default function App() {
   const selectedVoiceMeta = VOICES.find((v) => v.id === voice) || VOICES[0];
 
   return (
-    <div className="flex h-screen w-full flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans">
+    <div className="flex min-h-dvh h-dvh w-full max-w-full flex-col bg-slate-950 text-slate-100 overflow-x-hidden overflow-y-hidden font-sans">
       {/* Top Navigation Bar */}
       <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-slate-800/80 px-3 sm:px-6 bg-slate-950/70 backdrop-blur-md z-30">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -939,27 +983,27 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden relative w-full max-w-full">
         {/* Left Side: Call Stage / Visualizer */}
-        <div className="flex-1 flex flex-col justify-between p-4 sm:p-6 overflow-y-auto">
+        <div className="flex-1 flex flex-col justify-between p-3 sm:p-6 overflow-y-auto overflow-x-hidden w-full max-w-full">
           {/* Quick Info Bar */}
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 w-full max-w-full mb-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5 max-w-full">
+              <span className="flex items-center gap-1.5 bg-slate-900/80 px-2 py-1 rounded-md border border-slate-800 text-[11px] sm:text-xs">
                 <Cpu className="h-3.5 w-3.5 text-indigo-400" />
                 <span className="font-mono text-slate-200">
                   {model === 'gemini-3.8-live' ? 'Model 1' : 'Model 2'}
                 </span>
               </span>
-              <span className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-md border border-slate-800">
+              <span className="flex items-center gap-1.5 bg-slate-900/80 px-2 py-1 rounded-md border border-slate-800 text-[11px] sm:text-xs">
                 <Volume2 className="h-3.5 w-3.5 text-cyan-400" />
                 <span>Voice:</span>
                 <strong className="text-white">{voice}</strong>
               </span>
               {activeContext.currentTopic && (
-                <span className="flex items-center gap-1.5 bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 px-2.5 py-1 rounded-md text-xs">
+                <span className="flex items-center gap-1.5 bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 px-2 py-1 rounded-md text-[11px] sm:text-xs">
                   <BookOpen className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                  <span className="font-semibold truncate max-w-[130px] sm:max-w-[200px]">{activeContext.currentTopic}</span>
+                  <span className="font-semibold truncate max-w-[110px] sm:max-w-[200px]">{activeContext.currentTopic}</span>
                 </span>
               )}
               <button
@@ -970,7 +1014,7 @@ export default function App() {
                   const nextSpeed = currentIdx === -1 || currentIdx === speeds.length - 1 ? speeds[0] : speeds[currentIdx + 1];
                   setSpeechSpeed(nextSpeed);
                 }}
-                className="flex items-center gap-1.5 bg-slate-900/80 hover:bg-slate-800 px-2.5 py-1 rounded-md border border-slate-800 text-slate-300 hover:text-white transition-colors"
+                className="flex items-center gap-1.5 bg-slate-900/80 hover:bg-slate-800 px-2 py-1 rounded-md border border-slate-800 text-slate-300 hover:text-white transition-colors text-[11px] sm:text-xs"
                 title="Click to cycle Speech Speed (0.85x, 1.0x, 1.15x, 1.25x)"
               >
                 <Gauge className="h-3.5 w-3.5 text-amber-400" />
@@ -980,27 +1024,26 @@ export default function App() {
             </div>
 
             {callStatus !== 'idle' && (
-              <div className="flex items-center gap-3 text-[11px] font-mono text-slate-500">
+              <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-mono text-slate-500">
                 <span className="text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30 flex items-center gap-1">
                   <RefreshCw className="h-3 w-3 animate-spin" style={{ animationDuration: '8s' }} />
-                  <span>Auto-Renew in {Math.max(0, 240 - (callDuration % 240))}s</span>
+                  <span>Auto-Renew: {Math.max(0, 240 - (callDuration % 240))}s</span>
                 </span>
-                <span className="hidden sm:inline">Audio In: 16kHz</span>
-                <span className="hidden sm:inline">Audio Out: 24kHz</span>
+                <span className="hidden sm:inline">16k/24k</span>
                 <span>Chunks: {chunksReceived}</span>
               </div>
             )}
           </div>
 
           {/* Central Interactive Orb & Stage */}
-          <div className="my-auto flex flex-col items-center justify-center py-6 relative">
+          <div className="my-auto flex flex-col items-center justify-center py-2 sm:py-6 relative w-full max-w-full overflow-hidden">
             {/* Hidden Video Canvas for Frame Streaming */}
             <video
               ref={videoRef}
               playsInline
               muted
               className={`rounded-2xl border-2 border-cyan-500/40 shadow-2xl bg-black mb-4 transition-all duration-300 ${
-                isVideoEnabled || isScreenEnabled ? 'w-64 h-48 object-cover' : 'hidden'
+                isVideoEnabled || isScreenEnabled ? 'w-64 h-48 object-cover max-w-full' : 'hidden'
               }`}
             />
 
@@ -1011,12 +1054,12 @@ export default function App() {
               </div>
             )}
 
-            {/* Audio Reactive Orb */}
+            {/* Audio Reactive Orb with responsive size */}
             <AudioOrb
               status={callStatus}
               userVolume={userVolume}
               aiVolume={aiVolume}
-              size={260}
+              size={typeof window !== 'undefined' && window.innerWidth < 450 ? 190 : 250}
             />
 
             {/* Live In-Call Mode Indicator & Switcher */}
@@ -1262,18 +1305,18 @@ export default function App() {
           </div>
 
             {/* Bottom Live Call Controls Toolbar */}
-            <div className="flex flex-col items-center gap-3 sm:gap-4 w-full">
-              <div className="flex items-center gap-1 sm:gap-2.5 p-1.5 sm:p-2 rounded-2xl border border-slate-800/90 bg-slate-900/80 backdrop-blur-md shadow-2xl max-w-full overflow-x-auto no-scrollbar justify-center">
+            <div className="flex flex-col items-center gap-2.5 sm:gap-4 w-full max-w-full">
+              <div className="flex flex-wrap items-center justify-center gap-1 sm:gap-2 p-1.5 sm:p-2 rounded-2xl border border-slate-800/90 bg-slate-900/80 backdrop-blur-md shadow-2xl w-full max-w-xl mx-auto">
                 {/* Mic Toggle */}
                 <button
                   onClick={toggleMic}
                   disabled={callStatus === 'idle'}
                   className={`p-2 sm:p-3 rounded-xl border transition-all ${
                     isMicMuted
-                      ? 'border-red-500/50 bg-red-950/40 text-red-400'
+                      ? 'border-red-500/50 bg-red-950/50 text-red-400 shadow-sm shadow-red-500/20'
                       : 'border-slate-700 bg-slate-800/80 text-white hover:bg-slate-700'
                   } disabled:opacity-40 disabled:cursor-not-allowed`}
-                  title={isMicMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+                  title={isMicMuted ? 'Unmute Microphone' : 'Mute Microphone (Noisy Area)'}
                 >
                   {isMicMuted ? <MicOff className="h-4 w-4 sm:h-5 sm:w-5" /> : <Mic className="h-4 w-4 sm:h-5 sm:w-5" />}
                 </button>
@@ -1361,17 +1404,28 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Noisy Environment Mic Muted Guidance Banner */}
+              {isMicMuted && (
+                <div className="w-full max-w-xl flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl border border-amber-500/40 bg-amber-950/70 text-amber-200 text-xs shadow-md animate-in fade-in">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <MicOff className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                    <span className="truncate">মাইক বন্ধ: কোলাহল হলেও নিচে লিখে বা Next বাটন চেপে সহজে ক্লাস করুন।</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleMic}
+                    className="text-[11px] font-bold text-amber-400 hover:text-amber-200 underline shrink-0"
+                  >
+                    মাইক অন
+                  </button>
+                </div>
+              )}
+
               {/* Quick Action Touch Buttons directly above Chat Input */}
-              <div className="w-full max-w-xl flex items-center justify-between gap-1.5 sm:gap-2 px-0.5">
+              <div className="w-full max-w-xl flex items-center justify-between gap-1 sm:gap-2 px-0.5">
                 <button
                   type="button"
-                  onClick={() =>
-                    sendQuickActionMessage(
-                      teachingMode === 'quiz'
-                        ? 'পরের প্রশ্নটি জিজ্ঞাসা করো'
-                        : 'পরের বিষয়টি নিয়ে বিস্তারিত আলোচনা করো'
-                    )
-                  }
+                  onClick={handleNextClick}
                   className="flex-1 py-1.5 px-2 rounded-xl border border-cyan-500/40 bg-cyan-950/50 hover:bg-cyan-900/60 active:scale-95 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm transition-all"
                   title="পরের বিষয় বা প্রশ্ন"
                 >
@@ -1730,13 +1784,7 @@ export default function App() {
             <div className="flex items-center justify-between gap-1.5">
               <button
                 type="button"
-                onClick={() =>
-                  sendQuickActionMessage(
-                    teachingMode === 'quiz'
-                      ? 'পরের প্রশ্নটি জিজ্ঞাসা করো'
-                      : 'পরের বিষয়টি নিয়ে বিস্তারিত আলোচনা করো'
-                  )
-                }
+                onClick={handleNextClick}
                 className="flex-1 py-1.5 px-1.5 rounded-lg border border-cyan-500/40 bg-cyan-950/60 active:scale-95 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm"
               >
                 <span>⏭️</span>
