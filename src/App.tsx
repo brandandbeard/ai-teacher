@@ -895,7 +895,7 @@ export default function App() {
   const selectedVoiceMeta = VOICES.find((v) => v.id === voice) || VOICES[0];
 
   return (
-    <div className="flex h-dvh h-screen max-h-screen w-full max-w-full flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans">
+    <div className="flex min-h-screen w-full max-w-full flex-col bg-slate-950 text-slate-100 font-sans">
       {/* Top Navigation Bar */}
       <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-slate-800/80 px-3 sm:px-6 bg-slate-950/70 backdrop-blur-md z-30">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -998,9 +998,9 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex flex-1 relative w-full max-w-full min-h-0 overflow-hidden">
+      <div className="flex flex-1 relative w-full max-w-full min-h-0 md:h-[calc(100vh-3.5rem)] md:overflow-hidden">
         {/* Left Side: Call Stage / Visualizer */}
-        <div className="flex-1 flex flex-col justify-between p-2 sm:p-5 overflow-y-auto overflow-x-hidden w-full max-w-full min-h-0 [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
+        <div className="flex-1 flex flex-col p-3 sm:p-5 overflow-y-auto overflow-x-hidden w-full max-w-full min-h-0 [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
           {/* Quick Info Bar */}
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 w-full max-w-full mb-2">
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5 max-w-full">
@@ -1058,7 +1058,7 @@ export default function App() {
           </div>
 
           {/* Central Interactive Orb & Stage */}
-          <div className="my-auto flex flex-col items-center justify-center py-2 sm:py-6 relative w-full max-w-full overflow-hidden">
+          <div className="flex-1 flex flex-col items-center justify-start py-2 sm:py-4 relative w-full max-w-full">
             {/* Hidden Video Canvas for Frame Streaming */}
             <video
               ref={videoRef}
@@ -1333,13 +1333,37 @@ export default function App() {
                       <span>প্রশ্ন উত্তর</span>
                     </button>
                   </div>
+
+                  {/* Immediate Start Class Call button inside the Unified Mode Section */}
+                  <div className="mt-3.5 pt-3 border-t border-indigo-500/20 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                    <div className="text-[11px] text-slate-300 flex items-center gap-1.5 max-w-full truncate">
+                      <span className="text-slate-400 shrink-0">নির্বাচিত:</span>
+                      <strong className="text-emerald-300 font-semibold truncate">
+                        {activeSection === 'wbbse'
+                          ? `${selectedClass} · ${selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল'}`
+                          : selectedCompetitiveSubject}
+                      </strong>
+                      <span className="text-slate-500 shrink-0">·</span>
+                      <span className="text-cyan-300 font-semibold shrink-0">
+                        {teachingMode === 'lecture' ? '🎙️ আলোচনা' : teachingMode === 'doubts' ? '🙋‍♂️ AI কে প্রশ্ন' : '📝 প্রশ্ন উত্তর'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => startCall(false)}
+                      className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 hover:brightness-110 active:scale-95 text-white shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-2 transition-all shrink-0"
+                    >
+                      <PhoneCall className="h-4 w-4" />
+                      <span>লাইভ ক্লাস শুরু করো (Start Live Call)</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
-            {/* Bottom Live Call Controls Toolbar */}
-            <div className="flex flex-col items-center gap-2.5 sm:gap-4 w-full max-w-full">
+          {/* Bottom Live Call Controls Toolbar */}
+          <div className="mt-4 flex flex-col items-center gap-2.5 sm:gap-4 w-full max-w-full pb-8">
               <div className="flex flex-wrap items-center justify-center gap-1 sm:gap-2 p-1.5 sm:p-2 rounded-2xl border border-slate-800/90 bg-slate-900/80 backdrop-blur-md shadow-2xl w-full max-w-xl mx-auto">
                 {/* Mic Toggle */}
                 <button
