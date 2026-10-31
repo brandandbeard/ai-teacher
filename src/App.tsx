@@ -1147,6 +1147,7 @@ export default function App() {
                   items={transcripts}
                   onClear={() => setTranscripts([])}
                   voiceName={voice}
+                  topicName={activeContext.currentTopic || selectedCompetitiveSubject}
                   compact={true}
                 />
               </div>
@@ -1548,6 +1549,7 @@ export default function App() {
             items={transcripts}
             onClear={() => setTranscripts([])}
             voiceName={voice}
+            topicName={activeContext.currentTopic || selectedCompetitiveSubject}
           />
         </div>
       </div>
@@ -1834,6 +1836,7 @@ export default function App() {
               items={transcripts}
               onClear={() => setTranscripts([])}
               voiceName={voice}
+              topicName={activeContext.currentTopic || selectedCompetitiveSubject}
             />
           </div>
 
