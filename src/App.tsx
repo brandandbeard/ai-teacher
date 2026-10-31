@@ -895,7 +895,7 @@ export default function App() {
   const selectedVoiceMeta = VOICES.find((v) => v.id === voice) || VOICES[0];
 
   return (
-    <div className="flex min-h-screen w-full max-w-full flex-col bg-slate-950 text-slate-100 overflow-x-hidden font-sans">
+    <div className="flex h-dvh h-screen max-h-screen w-full max-w-full flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* Top Navigation Bar */}
       <header className="flex h-14 sm:h-16 shrink-0 items-center justify-between border-b border-slate-800/80 px-3 sm:px-6 bg-slate-950/70 backdrop-blur-md z-30">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -998,9 +998,9 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <div className="flex flex-1 relative w-full max-w-full min-h-0">
+      <div className="flex flex-1 relative w-full max-w-full min-h-0 overflow-hidden">
         {/* Left Side: Call Stage / Visualizer */}
-        <div className="flex-1 flex flex-col justify-between p-2.5 sm:p-6 overflow-y-auto overflow-x-hidden w-full max-w-full min-h-0">
+        <div className="flex-1 flex flex-col justify-between p-2 sm:p-5 overflow-y-auto overflow-x-hidden w-full max-w-full min-h-0 [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
           {/* Quick Info Bar */}
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 w-full max-w-full mb-2">
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2.5 max-w-full">
@@ -1081,17 +1081,17 @@ export default function App() {
               status={callStatus}
               userVolume={userVolume}
               aiVolume={aiVolume}
-              size={typeof window !== 'undefined' && window.innerWidth < 450 ? 190 : 250}
+              size={typeof window !== 'undefined' && window.innerWidth < 450 ? (callStatus === 'idle' ? 180 : 120) : (callStatus === 'idle' ? 240 : 170)}
             />
 
             {/* Live In-Call Mode Indicator & Switcher */}
             {callStatus !== 'idle' && (
-              <div className="mt-3 flex items-center gap-2 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl backdrop-blur-md">
+              <div className="mt-2.5 flex items-center gap-1.5 sm:gap-2 p-1 sm:p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl backdrop-blur-md">
                 <span className="text-[10px] text-slate-400 font-semibold px-2 hidden sm:inline">পড়ার মোড:</span>
                 <button
                   type="button"
                   onClick={() => handleSelectMode('lecture')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 sm:gap-1.5 transition-all ${
                     teachingMode === 'lecture'
                       ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/40 ring-1 ring-emerald-400'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
@@ -1104,7 +1104,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => handleSelectMode('doubts')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 sm:gap-1.5 transition-all ${
                     teachingMode === 'doubts'
                       ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/40 ring-1 ring-cyan-400'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
@@ -1117,7 +1117,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => handleSelectMode('quiz')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                  className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 sm:gap-1.5 transition-all ${
                     teachingMode === 'quiz'
                       ? 'bg-purple-600 text-white shadow-md shadow-purple-600/40 ring-1 ring-purple-400'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
@@ -1131,14 +1131,26 @@ export default function App() {
             )}
 
             {/* Status Text & Subtitle */}
-            <div className="mt-4 text-center">
+            <div className="mt-2.5 text-center">
               <p className="text-sm font-semibold text-slate-200 tracking-wide">{statusMessage}</p>
-              <p className="text-xs text-slate-500 mt-1 max-w-md">
-                {callStatus === 'idle'
-                  ? 'শ্রেণি ও মোড নির্বাচন করে সরাসরি লাইভ ক্লাস শুরু করো।'
-                  : 'Speak into your microphone. Say anything or ask questions to interrupt and converse.'}
-              </p>
+              {callStatus === 'idle' && (
+                <p className="text-xs text-slate-500 mt-1 max-w-md">
+                  শ্রেণি ও বিষয় নির্বাচন করে সরাসরি লাইভ ক্লাস শুরু করো।
+                </p>
+              )}
             </div>
+
+            {/* Mobile Inline YouTube Live Chat View (Only on mobile when in call) */}
+            {callStatus !== 'idle' && (
+              <div className="md:hidden w-full max-w-xl h-44 sm:h-52 my-2.5 shrink-0">
+                <TranscriptView
+                  items={transcripts}
+                  onClear={() => setTranscripts([])}
+                  voiceName={voice}
+                  compact={true}
+                />
+              </div>
+            )}
 
             {/* Quick Starter Conversation Prompts - Strictly Separated Sections */}
             {callStatus === 'idle' && (
@@ -1507,7 +1519,7 @@ export default function App() {
           </div>
 
         {/* Right Side: Live Transcript View */}
-        <div className="w-80 lg:w-96 border-l border-slate-800/80 bg-slate-950/40 flex flex-col p-4 shrink-0 hidden md:flex">
+        <div className="w-80 lg:w-96 border-l border-slate-800/80 bg-slate-950/40 flex flex-col p-3 lg:p-4 shrink-0 hidden md:flex min-h-0 h-full overflow-hidden">
           <TranscriptView
             items={transcripts}
             onClear={() => setTranscripts([])}
