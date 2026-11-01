@@ -48,6 +48,7 @@ import {
   WBBSE_SCIENCE_PROMPT,
   WBBSE_GEOGRAPHY_PROMPT,
 } from './data/teacherPersonas.ts';
+import { sanitizeBilingualText } from './utils/bilingualFilter.ts';
 
 type CallStatus = 'idle' | 'connecting' | 'active' | 'speaking' | 'listening' | 'interrupted';
 
@@ -492,17 +493,22 @@ export default function App() {
           }
 
           if (msg.type === 'model_transcript' && msg.text) {
-            // Append model speech transcript and update state machine
-            appendOrUpdateTranscript('gemini', msg.text);
-            conversationStateMachine.processModelOutput(msg.text);
-            setActiveContext({ ...conversationStateMachine.getContext() });
+            const cleanText = sanitizeBilingualText(msg.text);
+            if (cleanText) {
+              appendOrUpdateTranscript('gemini', cleanText);
+              conversationStateMachine.processModelOutput(cleanText);
+              setActiveContext({ ...conversationStateMachine.getContext() });
+            }
           }
 
           if (msg.type === 'user_transcript' && msg.text) {
-            // Student audio transcription from Gemini Live
-            appendOrUpdateTranscript('user', msg.text);
-            conversationStateMachine.processStudentInput(msg.text);
-            setActiveContext({ ...conversationStateMachine.getContext() });
+            // Student audio transcription from Gemini Live (sanitized for bilingual Bengali/English)
+            const cleanText = sanitizeBilingualText(msg.text);
+            if (cleanText) {
+              appendOrUpdateTranscript('user', cleanText);
+              conversationStateMachine.processStudentInput(cleanText);
+              setActiveContext({ ...conversationStateMachine.getContext() });
+            }
           }
 
           if (msg.type === 'tool_call') {

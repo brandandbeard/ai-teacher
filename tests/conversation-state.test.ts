@@ -417,6 +417,36 @@ test('Scenario X: Disconnecting call (clearTopic) resets currentTopic to null an
   assert.equal(sm.getContext().isLessonStarted, false);
 });
 
+test('Scenario Y: Bilingual filter accepts pure Bengali, pure English, and mixed Bengali-English', async () => {
+  const { sanitizeBilingualText } = await import('../src/utils/bilingualFilter.ts');
+  
+  // Pure Bengali
+  assert.equal(sanitizeBilingualText('আমি জৈব রসায়ন পড়তে চাই'), 'আমি জৈব রসায়ন পড়তে চাই');
+  
+  // Pure English
+  assert.equal(sanitizeBilingualText('Please explain the periodic table'), 'Please explain the periodic table');
+  
+  // Mixed Bengali-English (Benglish)
+  assert.equal(sanitizeBilingualText('Sir, ei topic er main point ta explain korun'), 'Sir, ei topic er main point ta explain korun');
+});
+
+test('Scenario Z: Bilingual filter rejects and cleans foreign acoustic hallucinations (Korean, French)', async () => {
+  const { sanitizeBilingualText, isForeignHallucination } = await import('../src/utils/bilingualFilter.ts');
+  
+  // Korean Hangul noise
+  assert.equal(sanitizeBilingualText('안녕하세요'), '');
+  assert.equal(isForeignHallucination('안녕하세요'), true);
+  
+  // Korean noise prefixing valid Bengali
+  assert.equal(sanitizeBilingualText('어... আলো অধ্যায় পড়াও'), 'আলো অধ্যায় পড়াও');
+  
+  // Pure French acoustic hallucination
+  assert.equal(sanitizeBilingualText('Oui merci'), '');
+  assert.equal(sanitizeBilingualText("d'accord"), '');
+  assert.equal(isForeignHallucination('Merci beaucoup'), true);
+});
+
+
 
 
 

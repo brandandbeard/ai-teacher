@@ -2,6 +2,7 @@ import { FunctionDeclaration, GoogleGenAI, LiveServerMessage, Modality, Type } f
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, ServerResponse } from "http";
 import dotenv from "dotenv";
+import { sanitizeBilingualText } from "../src/utils/bilingualFilter.ts";
 
 dotenv.config();
 
@@ -333,12 +334,15 @@ Return ONLY a short clean title string like "অধ্যায় ৩: পদা�
                     );
                   }
                   if (part.text) {
-                    clientWs.send(
-                      JSON.stringify({
-                        type: "model_transcript",
-                        text: part.text,
-                      })
-                    );
+                    const cleanModelPart = sanitizeBilingualText(part.text);
+                    if (cleanModelPart) {
+                      clientWs.send(
+                        JSON.stringify({
+                          type: "model_transcript",
+                          text: cleanModelPart,
+                        })
+                      );
+                    }
                   }
                 }
               }
@@ -348,12 +352,15 @@ Return ONLY a short clean title string like "অধ্যায় ৩: পদা�
                 serverMsg.serverContent?.outputTranscription?.text ||
                 (serverMsg as any)?.outputTranscription?.text;
               if (outputModelText) {
-                clientWs.send(
-                  JSON.stringify({
-                    type: "model_transcript",
-                    text: outputModelText,
-                  })
-                );
+                const cleanModelText = sanitizeBilingualText(outputModelText);
+                if (cleanModelText) {
+                  clientWs.send(
+                    JSON.stringify({
+                      type: "model_transcript",
+                      text: cleanModelText,
+                    })
+                  );
+                }
               }
 
               // 4. Handle user speech transcription from Gemini Live inputAudioTranscription
@@ -363,12 +370,15 @@ Return ONLY a short clean title string like "অধ্যায় ৩: পদা�
                 serverMsg.serverContent?.interimInputTranscription?.text ||
                 (serverMsg as any)?.interimInputTranscription?.text;
               if (userTranscript) {
-                clientWs.send(
-                  JSON.stringify({
-                    type: "user_transcript",
-                    text: userTranscript,
-                  })
-                );
+                const cleanUserTranscript = sanitizeBilingualText(userTranscript);
+                if (cleanUserTranscript) {
+                  clientWs.send(
+                    JSON.stringify({
+                      type: "user_transcript",
+                      text: cleanUserTranscript,
+                    })
+                  );
+                }
               }
 
               // 5. Handle interrupted event
@@ -582,6 +592,17 @@ Return ONLY a short clean title string like "অধ্যায় ৩: পদা�
             if (contextSummary.chapter) metaParts.push(`Chapter="${contextSummary.chapter}"`);
             metaParts.push(`Topic="${contextSummary.currentTopic}"`);
             sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: ${metaParts.join(', ')}. Strictly teach ONLY this active subject and topic. DO NOT mix any other subject or say any initial greeting. Immediately resume continuous teaching of this topic.]`;
+          }
+
+          // Strict Bilingual Directive: Guarantee student speech is recognized exclusively as Bengali or English
+          if (!sysInstruction.includes("STRICT BILINGUAL ONLY DIRECTIVE")) {
+            sysInstruction += `\n\n[STRICT BILINGUAL ONLY DIRECTIVE (STUDENT SPEECH RECOGNITION & UNDERSTANDING):
+- The student speaks EXCLUSIVELY in Bengali (বাংলা), English, or mixed Bengali-English ('Benglish' / বাংলা-ইংরেজি মিশ্রণ / code-switching).
+- The student NEVER speaks French, Korean, Japanese, Chinese, Russian, Spanish, Arabic, or any other foreign language!
+- CRITICAL AUDIO HALLUCINATION PREVENTION: When listening to the student's voice through microphone audio, if there is background noise, room echo, breathing, or Indian/Bengali accent, NEVER transcribe, interpret, or guess words in French, Korean, Chinese, Japanese, or other foreign languages.
+- You must ALWAYS interpret acoustic speech strictly as Bengali (বাংলা) or English words within the educational and study context!
+- If acoustic audio is noisy or unclear, interpret it in Bengali/English or ask politely in Bengali/English to clarify, but NEVER output Korean, French, or foreign language responses or transcriptions!
+- All your explanations, teaching, feedback, and transcriptions MUST strictly be in Bengali (বাংলা) and/or English.]`;
           }
 
           sessionParams = {
