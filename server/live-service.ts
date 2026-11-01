@@ -295,8 +295,25 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
                 }
               }
 
+              // Model Spoken Audio Transcription (outputAudioTranscription)
+              const outputModelText =
+                serverMsg.serverContent?.outputTranscription?.text ||
+                (serverMsg as any)?.outputTranscription?.text;
+              if (outputModelText) {
+                clientWs.send(
+                  JSON.stringify({
+                    type: "model_transcript",
+                    text: outputModelText,
+                  })
+                );
+              }
+
               // 4. Handle user speech transcription from Gemini Live inputAudioTranscription
-              const userTranscript = (serverMsg.serverContent as any)?.inputTranscription?.text;
+              const userTranscript =
+                serverMsg.serverContent?.inputTranscription?.text ||
+                (serverMsg as any)?.inputTranscription?.text ||
+                serverMsg.serverContent?.interimInputTranscription?.text ||
+                (serverMsg as any)?.interimInputTranscription?.text;
               if (userTranscript) {
                 clientWs.send(
                   JSON.stringify({

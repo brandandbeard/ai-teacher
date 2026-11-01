@@ -305,25 +305,25 @@ export class ConversationStateMachine {
         identifiedTopic = "Charles's Law & Absolute Zero";
       } else if (/অ্যাভোগাড্রো|avogadro/i.test(text)) {
         identifiedTopic = "Avogadro's Hypothesis";
-      } else if (/কোষ|cell|সালোকসংশ্লেষ|photosynthesis/i.test(text)) {
+      } else if (/কোষ|cell|সালোকসংশ্লেষ|photosynthesis|ডিএনএ|dna|জিন|genetics/i.test(text)) {
         identifiedTopic = 'Cell Division / Photosynthesis (Life Science)';
-      } else if (/আলো|optics|light/i.test(text)) {
+      } else if (/আলো|optics|light|প্রতিসরণ|প্রতিফলন/i.test(text)) {
         identifiedTopic = 'আলো (Light)';
-      } else if (/চলতড়িৎ|electricity|ওহম|ohm/i.test(text)) {
+      } else if (/চলতড়িৎ|electricity|ওহম|ohm|কারেন্ট|ভোল্টেজ/i.test(text)) {
         identifiedTopic = 'চলতড়িৎ (Current Electricity)';
       } else if (/পলাশী|plassey/i.test(text)) {
         identifiedTopic = 'পলাশীর যুদ্ধ (Battle of Plassey)';
       } else if (/মহাবিদ্রোহ|সিপাহী|1857|১৮৫৭/i.test(text)) {
         identifiedTopic = '১৮৫৭-র মহাবিদ্রোহ';
-      } else if (/সংবিধান|constitution|মৌলিক\s*অধিকার|fundamental\s*rights|preamble|প্রস্তাবনা/i.test(text)) {
+      } else if (/সংবিধান|constitution|মৌলিক\s*অধিকার|fundamental\s*rights|preamble|প্রস্তাবনা|নাগরিকত্ব/i.test(text)) {
         identifiedTopic = 'Indian Constitution & Fundamental Rights';
-      } else if (/অর্থনীতি|economy|rbi|মুদ্রাস্ফীতি|inflation|gdp/i.test(text)) {
+      } else if (/অর্থনীতি|economy|rbi|মুদ্রাস্ফীতি|inflation|gdp|মুদ্রা|ব্যাংক/i.test(text)) {
         identifiedTopic = 'Indian Economy & Banking System';
-      } else if (/মুঘল|mughal|বাবর|আকবর|সুলতানি|sultanate/i.test(text)) {
+      } else if (/মুঘল|mughal|বাবর|আকবর|সুলতানি|sultanate|মধ্যযুগ/i.test(text)) {
         identifiedTopic = 'Mughal Empire & Medieval India';
-      } else if (/সিন্ধু|হরপ্পা|indus|harappa/i.test(text)) {
+      } else if (/সিন্ধু|হরপ্পা|indus|harappa|মহেঞ্জোদাড়ো/i.test(text)) {
         identifiedTopic = 'Indus Valley Civilization & Ancient India';
-      } else if (/নদী|হিমবাহ|বায়ুমণ্ডল|climate|glacier/i.test(text)) {
+      } else if (/নদী|হিমবাহ|বায়ুমণ্ডল|climate|glacier|জলবায়ু|বায়ুপ্রবাহ/i.test(text)) {
         identifiedTopic = 'ভূগোল ও প্রাকৃতিক ভূমিরূপ';
       }
     } else {
@@ -331,25 +331,27 @@ export class ConversationStateMachine {
         identifiedTopic = 'Professional Workplace Email Writing & Polite Business Dialogue';
       } else if (lower.includes('idiom') || lower.includes('phrasal')) {
         identifiedTopic = 'Everyday Idioms & Phrasal Verbs in Smart Conversations';
-      } else if (lower.includes('interview') || lower.includes('intro')) {
+      } else if (lower.includes('interview') || lower.includes('ইন্টারভিউ') || lower.includes('intro') || lower.includes('introduce')) {
         identifiedTopic = 'Mastering Job Interview Responses: Self Intro & Goals';
-      } else if (lower.includes('travel') || lower.includes('flight') || lower.includes('airport')) {
+      } else if (lower.includes('travel') || lower.includes('flight') || lower.includes('airport') || lower.includes('ভ্রমণ')) {
         identifiedTopic = 'Travel, Airport & Daily Routine Conversation';
-      } else if (lower.includes('story') || lower.includes('narrative')) {
+      } else if (lower.includes('story') || lower.includes('narrative') || lower.includes('গল্প')) {
         identifiedTopic = 'Story Building & Picture Narrative Drill';
       } else if (lower.includes('hesitation') || lower.includes('fluency') || lower.includes('speaking')) {
         identifiedTopic = 'Overcoming Hesitation & Fast Turn-Taking';
-      } else if (lower.includes('grammar') || lower.includes('tense') || lower.includes('preposition')) {
+      } else if (lower.includes('grammar') || lower.includes('tense') || lower.includes('টেন্স') || lower.includes('preposition') || lower.includes('ব্যাকরণ')) {
         identifiedTopic = 'Common Grammatical Traps & Tense Flaws';
       }
     }
 
-    // Direct topic extraction if user explicitly says "Topic: X", "Explain X", "Let's study X", "আমার টপিক X"
+    // Direct topic extraction if user explicitly says "Topic: X", "Explain X", "Let's study X", "আমার টপিক X", "... নিয়ে আলোচনা করো", "... সম্পর্কে বলো"
     if (!identifiedTopic) {
-      const explicitTopicMatch = text.match(/(?:topic|টপিক|বিষয়|বিষয়|chapter|অধ্যায়|learn|study|explain|পড়াও|আলোচনা\s*করো)\s*[:：\-]?\s*([A-Za-z0-9\s\u0980-\u09FF\-\'’]{3,40})/i);
+      const explicitTopicMatch =
+        text.match(/(?:topic|টপিক|বিষয়|বিষয়|chapter|অধ্যায়|learn|study|explain|পড়াও|আলোচনা\s*করো)\s*[:：\-]?\s*([A-Za-z0-9\s\u0980-\u09FF\-\'’]{3,40})/i) ||
+        text.match(/([A-Za-z0-9\s\u0980-\u09FF\-\'’]{3,40})\s*(?:নিয়ে\s*আলোচনা|সম্পর্কে\s*বলো|বোঝাও|পড়াও|নিয়ে\s*পড়াও|শুরু\s*করো)/i);
       if (explicitTopicMatch && explicitTopicMatch[1]) {
         const candidate = explicitTopicMatch[1].trim();
-        if (candidate.length >= 3 && !/^(করো|বলো|দাও|হবে|please|now)$/i.test(candidate)) {
+        if (candidate.length >= 3 && !/^(করো|বলো|দাও|হবে|please|now|এবার|এখন)$/i.test(candidate)) {
           identifiedTopic = candidate;
         }
       }

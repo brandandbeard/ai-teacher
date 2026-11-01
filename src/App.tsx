@@ -191,6 +191,49 @@ export default function App() {
     });
   }, []);
 
+  // Intelligent transcript updater for real-time streaming speech
+  const appendOrUpdateTranscript = useCallback((sender: 'user' | 'gemini', text: string, extra?: any) => {
+    if (!text || !text.trim()) return;
+    const clean = text.trim();
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    setTranscripts((prev) => {
+      if (prev.length > 0) {
+        const last = prev[prev.length - 1];
+        if (last.sender === sender) {
+          let updatedText = last.text;
+          if (clean.startsWith(last.text)) {
+            updatedText = clean;
+          } else if (last.text.startsWith(clean)) {
+            updatedText = last.text;
+          } else if (!last.text.includes(clean)) {
+            updatedText = `${last.text} ${clean}`;
+          }
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            ...last,
+            text: updatedText,
+            timestamp: timeStr,
+            isInterrupted: extra?.isInterrupted ?? last.isInterrupted,
+          };
+          return updated;
+        }
+      }
+      return [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          sender,
+          text: clean,
+          timestamp: timeStr,
+          toolDetails: extra?.toolDetails,
+          isInterrupted: extra?.isInterrupted,
+        },
+      ];
+    });
+  }, []);
+
   // Clear silence / inactivity auto-disconnect timer
   const clearInactivityTimer = useCallback(() => {
     if (inactivityTimeoutRef.current) {
@@ -402,13 +445,13 @@ export default function App() {
 
           if (msg.type === 'model_transcript' && msg.text) {
             // Append model speech transcript and update state machine
-            addTranscript('gemini', msg.text);
+            appendOrUpdateTranscript('gemini', msg.text);
             conversationStateMachine.processModelOutput(msg.text);
           }
 
           if (msg.type === 'user_transcript' && msg.text) {
             // Student audio transcription from Gemini Live
-            addTranscript('user', msg.text);
+            appendOrUpdateTranscript('user', msg.text);
             conversationStateMachine.processStudentInput(msg.text);
           }
 
@@ -907,10 +950,20 @@ export default function App() {
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
-                Mega Quiz Voice AI -By Arif Hussain
+                Mega Quiz Voice AI
               </h1>
+              <span className="text-[10px] sm:text-xs text-slate-500 hidden sm:inline">-By Arif Hussain</span>
+              {/* Prominent Active Topic in Top Heading */}
+              {activeContext.currentTopic && (
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-950/90 border border-emerald-500/50 text-emerald-300 text-[11px] font-bold truncate max-w-[150px] sm:max-w-[280px] shadow-sm animate-in fade-in">
+                  <span className="text-emerald-400">📖 টপিক:</span>
+                  <span className="truncate">{activeContext.currentTopic}</span>
+                </span>
+              )}
             </div>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate hidden xs:block">Real-time Conversational Voice & Vision</p>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate hidden xs:block">
+              {activeContext.currentTopic ? `চলমান পাঠ: ${activeContext.currentTopic}` : 'Real-time Conversational Voice & Vision'}
+            </p>
           </div>
         </div>
 
@@ -1408,22 +1461,14 @@ export default function App() {
                   <Monitor className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
 
-                {/* Main Call Start / End Button */}
-                {callStatus === 'idle' ? (
-                  <button
-                    onClick={() => startCall(false)}
-                    className="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 text-white shadow-xl shadow-cyan-500/25 hover:brightness-110 active:scale-95 transition-all shrink-0"
-                  >
-                    <PhoneCall className="h-4 w-4 sm:h-5 sm:w-5" />
-                    <span>Start Live Call</span>
-                  </button>
-                ) : (
+                {/* End Call Button (Only shown during active call) */}
+                {callStatus !== 'idle' && (
                   <button
                     onClick={stopCall}
                     className="flex items-center gap-1.5 sm:gap-2 px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs sm:text-sm bg-red-600 hover:bg-red-500 text-white shadow-xl shadow-red-600/25 active:scale-95 transition-all shrink-0"
                   >
                     <PhoneOff className="h-4 w-4 sm:h-5 sm:w-5" />
-                    <span>End Call</span>
+                    <span>End Call (কল শেষ করুন)</span>
                   </button>
                 )}
 

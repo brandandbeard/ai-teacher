@@ -208,7 +208,7 @@ export class LiveAudioRecorder {
   // Adaptive Voice Activity Detection parameters
   private vadEnabled = true;
   private sensitivityLevel = 50; // 0 (Full Noise / Maximum suppression) to 100 (No Noise / Delicate sensitivity)
-  private silenceWaitMs = 750; // Low-latency turn turnaround: 750ms
+  private silenceWaitMs = 1400; // Generous conversational turn turnaround: 1.4s (prevents cutting off mid-speech)
   private noiseFloor = 0.007; // Dynamic background noise floor
   private isUserSpeaking = false;
   private lastSpeechTime = 0;
