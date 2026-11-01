@@ -321,4 +321,71 @@ test('Scenario R: Dynamic topic badge update when user mentions topics like Prof
   unsubscribe();
 });
 
+test('Scenario S: Class 7 Science topics (Heat, Atoms, Human Body) correctly extracted', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  sm.setTeachingMode('lecture', 'Class 7', 'বিজ্ঞান');
+
+  // Student asks for Heat / Temperature
+  const intent1 = sm.processStudentInput('ম্যাডাম ক্লাস ৭ এর তাপ ও তাপমাত্রা নিয়ে আলোচনা করুন');
+  assert.equal(sm.getContext().currentTopic, 'তাপ ও তাপমাত্রা (Heat & Temperature)');
+
+  // Student switches to Human Body / Digestion / Lungs
+  const intent2 = sm.processStudentInput('এবার মানবদেহের ফুসফুস ও পরিপাকতন্ত্র নিয়ে বলো');
+  assert.equal(sm.getContext().currentTopic, 'মানবদেহের প্রধান অঙ্গ ও শারীরস্থান');
+
+  // Student requests generic topic change
+  const intent3 = sm.processStudentInput('টপিক চেঞ্জ করো');
+  assert.ok(sm.getContext().currentTopic !== null);
+});
+
+test('Scenario T: Competitive subject selection (Science & Tech, Indian History) does not cross-pollinate with WBBSE Science', () => {
+  const sm = new ConversationStateMachine();
+  
+  // Competitive Science & Technology
+  const compTopic = sm.pickRandomTopic('Science & Technology');
+  assert.ok(compTopic.includes('ISRO') || compTopic.includes('ডিআরডিও') || compTopic.includes('পারমাণবিক') || compTopic.includes('বায়োটেকনোলজি') || compTopic.includes('কৃত্রিম বুদ্ধিমত্তা') || compTopic.includes('শক্তি'));
+  // Must NOT be WBBSE Class 10 Light
+  assert.ok(!compTopic.includes('গোলীয় দর্পণ'));
+
+  // Competitive Indian History
+  const histTopic = sm.pickRandomTopic('Indian History');
+  assert.ok(
+    histTopic.includes('সিন্ধু') ||
+    histTopic.includes('মৌর্য') ||
+    histTopic.includes('গুপ্ত') ||
+    histTopic.includes('সুলতানি') ||
+    histTopic.includes('মুঘল') ||
+    histTopic.includes('পলাশী') ||
+    histTopic.includes('মহাবিদ্রোহ') ||
+    histTopic.includes('গান্ধী') ||
+    histTopic.includes('নেতাজি')
+  );
+});
+
+test('Scenario U: User request "জৈব রসায়ন আলোচনা করো।" updates topic to Organic Chemistry', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  sm.setTeachingMode('lecture', 'Class 10', 'বিজ্ঞান');
+
+  const intent = sm.processStudentInput('জৈব রসায়ন আলোচনা করো।');
+  assert.equal(intent.extractedTopic, 'জৈব রসায়ন (Organic Chemistry)');
+  assert.equal(sm.getContext().currentTopic, 'জৈব রসায়ন (Organic Chemistry)');
+});
+
+test('Scenario V: Numbered chapter resolution for Class 10 Science Chapter 3 and Class 7 Geography', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  sm.setTeachingMode('lecture', 'Class 10', 'বিজ্ঞান');
+
+  const intent1 = sm.processStudentInput('অধ্যায় ৩ পড়াও');
+  assert.ok(intent1.extractedTopic?.includes('রাসায়নিক গণনা'));
+
+  const sm2 = new ConversationStateMachine();
+  sm2.setTeachingMode('lecture', 'Class 7', 'ভূগোল');
+  const intent2 = sm2.processStudentInput('chapter 2 পড়াও');
+  assert.ok(intent2.extractedTopic?.includes('অক্ষরেখা ও দ্রাঘিমারেখা'));
+});
+
+
 

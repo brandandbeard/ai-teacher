@@ -227,6 +227,42 @@ export const COMPETITIVE_TOPICS: Record<string, string[]> = {
 export function getRandomTopic(subject: string, className?: string): string {
   const normSubj = subject.toLowerCase();
 
+  // Competitive Subjects priority checks (prevents cross-contamination with WBBSE science/history)
+  if (normSubj.includes('technology') || normSubj.includes('science & tech') || normSubj.includes('science & technology')) {
+    const list = COMPETITIVE_TOPICS['Science & Technology'];
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  if (normSubj.includes('astronomy') || normSubj.includes('geography & astronomy')) {
+    const list = COMPETITIVE_TOPICS['Geography & Astronomy'];
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  if (normSubj.includes('indian history')) {
+    const list = COMPETITIVE_TOPICS['Indian History'];
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  if (normSubj.includes('polity') || normSubj.includes('constitution')) {
+    const list = COMPETITIVE_TOPICS['Polity & Constitution'];
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  if (normSubj.includes('economy') || normSubj.includes('banking')) {
+    const list = COMPETITIVE_TOPICS['Indian Economy'];
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  if (normSubj.includes('spoken') || normSubj.includes('english')) {
+    const list = COMPETITIVE_TOPICS['Spoken English'];
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  if (normSubj.includes('static') || normSubj.includes('gk')) {
+    const list = COMPETITIVE_TOPICS['Static GK'];
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
   // WBBSE Science
   if (normSubj.includes('বিজ্ঞান') || normSubj.includes('science')) {
     const cls = className || 'Class 10';
@@ -236,10 +272,6 @@ export function getRandomTopic(subject: string, className?: string): string {
 
   // WBBSE History
   if (normSubj.includes('ইতিহাস') || normSubj.includes('history')) {
-    if (normSubj.includes('indian')) {
-      const list = COMPETITIVE_TOPICS['Indian History'];
-      return list[Math.floor(Math.random() * list.length)];
-    }
     const cls = className || 'Class 10';
     const list = WBBSE_HISTORY_TOPICS[cls] || WBBSE_HISTORY_TOPICS['Class 10'];
     return list[Math.floor(Math.random() * list.length)];
@@ -247,16 +279,12 @@ export function getRandomTopic(subject: string, className?: string): string {
 
   // WBBSE Geography
   if (normSubj.includes('ভূগোল') || normSubj.includes('geography')) {
-    if (normSubj.includes('astronomy')) {
-      const list = COMPETITIVE_TOPICS['Geography & Astronomy'];
-      return list[Math.floor(Math.random() * list.length)];
-    }
     const cls = className || 'Class 10';
     const list = WBBSE_GEOGRAPHY_TOPICS[cls] || WBBSE_GEOGRAPHY_TOPICS['Class 10'];
     return list[Math.floor(Math.random() * list.length)];
   }
 
-  // Competitive subjects
+  // Competitive subjects fallback loop
   for (const [key, topics] of Object.entries(COMPETITIVE_TOPICS)) {
     if (normSubj.includes(key.toLowerCase()) || key.toLowerCase().includes(normSubj)) {
       return topics[Math.floor(Math.random() * topics.length)];
@@ -265,4 +293,189 @@ export function getRandomTopic(subject: string, className?: string): string {
 
   // Fallback default
   return "পশ্চিমবঙ্গ মধ্যশিক্ষা পর্ষদের পাঠ্যবই অনুসারে এই বিষয়ের একটি গুরুত্বপূর্ণ ও আকর্ষণীয় অধ্যায়";
+}
+
+/**
+ * Complete WBBSE Chapter Mapping by Number for Class 5 to Class 10
+ */
+export const WBBSE_CHAPTER_NUM_MAP: Record<string, Record<string, Record<string, string>>> = {
+  'Class 10': {
+    'science': {
+      '1': 'অধ্যায় ১: পরিবেশের জন্য ভাবনা (Concern about our Environment)',
+      '2': 'অধ্যায় ২: গ্যাসের আচরণ: বয়েলের সূত্র ও চার্লসের সূত্র (Behaviour of Gases)',
+      '3': 'অধ্যায় ৩: রাসায়নিক গণনা (Chemical Calculations)',
+      '4': 'অধ্যায় ৪: তাপের ঘটনাসমূহ (Thermal Phenomena)',
+      '5': 'অধ্যায় ৫: আলো: গোলীয় দর্পণ, লেন্স ও প্রতিসরণ (Light)',
+      '6': 'অধ্যায় ৬: চলতড়িৎ ও ওহমের সূত্র (Current Electricity)',
+      '7': 'অধ্যায় ৭: পরমাণুর নিউক্লিয়াস ও তেজস্ক্রিয়তা (Atomic Nucleus)',
+      '8': 'অধ্যায় ৮: পর্যায় সারণী, রাসায়নিক বন্ধন ও জৈব রসায়ন',
+      '8.1': 'অধ্যায় ৮.১: পর্যায় সারণী ও মৌলদের ধর্মের পর্যায়বৃত্ততা',
+      '8.2': 'অধ্যায় ৮.২: আয়নীয় ও সমযোজী বন্ধন',
+      '8.3': 'অধ্যায় ৮.৩: তড়িৎপ্রবাহ ও রাসায়নিক বিক্রিয়া',
+      '8.4': 'অধ্যায় ৮.৪: অজৈব রসায়ন ও পরীক্ষাগার প্রস্তুতি',
+      '8.5': 'অধ্যায় ৮.৫: ধাতুবিদ্যা ও আকরিক নিষ্কাশন',
+      '8.6': 'অধ্যায় ৮.৬: জৈব রসায়ন (Organic Chemistry: মিথেন, ইথিলিন, পলিমার)',
+    },
+    'history': {
+      '1': 'অধ্যায় ১: ইতিহাসের ধারণা (Ideas of History)',
+      '2': 'অধ্যায় ২: সংস্কার: বৈশিষ্ট্য ও পর্যালোচনা (Reform: Characteristics & Review)',
+      '3': 'অধ্যায় ৩: প্রতিরোধ ও বিদ্রোহ (Resistance and Rebellion: Characteristics & Analysis)',
+      '4': 'অধ্যায় ৪: সংঘবদ্ধতার গোড়ার কথা: ১৮৫৭-র মহাবিদ্রোহ (Early Stages of Collective Action)',
+      '5': 'অধ্যায় ৫: বিকল্প চিন্তা ও উদ্যোগ (Alternative Ideas and Initiatives)',
+      '6': 'অধ্যায় ৬: বিশ শতকের ভারতে কৃষক, শ্রমিক ও বামপন্থী আন্দোলন',
+      '7': 'অধ্যায় ৭: বিশ শতকের ভারতে নারী, ছাত্র ও প্রান্তিক জনগোষ্ঠীর আন্দোলন',
+      '8': 'অধ্যায় ৮: উত্তর-ঔপনিবেশিক ভারত: দেশভাগ ও পুনর্বাসন (Post-Colonial India)',
+    },
+    'geography': {
+      '1': 'অধ্যায় ১: বহির্জাত প্রক্রিয়া ও তাদের দ্বারা সৃষ্ট ভূমিরূপ (Exogenetic Processes & Landforms)',
+      '2': 'অধ্যায় ২: বায়ুমণ্ডল: স্তরবিন্যাস ও বায়ুপ্রবাহ (Atmosphere)',
+      '3': 'অধ্যায় ৩: বারিমণ্ডল ও সমুদ্রস্রোত (Hydrosphere & Ocean Currents)',
+      '4': 'অধ্যায় ৪: বর্জ্য ব্যবস্থাপনা (Waste Management)',
+      '5': 'অধ্যায় ৫: ভারত: প্রাকৃতিক ও অর্থনৈতিক পরিবেশ (India: Physical & Economic)',
+      '6': 'অধ্যায় ৬: উপগ্রহ চিত্র ও ভূবৈচিত্র্যসূচক মানচিত্র (Satellite Imagery & Toposheets)',
+    },
+  },
+  'Class 9': {
+    'science': {
+      '1': 'অধ্যায় ১: পরিমাপের পদ্ধতি ও একক (Measurement & Units)',
+      '2': 'অধ্যায় ২: বল ও গতি: নিউটনের গতিসূত্র (Force & Motion)',
+      '3': 'অধ্যায় ৩: পরমাণুর গঠন ও পদার্থের ভৌত-রাসায়নিক ধর্ম (Structure of Atom)',
+      '4': 'অধ্যায় ৪: পদার্থের গঠন ও ধর্ম: সান্দ্রতা ও পৃষ্ঠটান (Matter: Structure & Properties)',
+      '5': 'অধ্যায় ৫: কার্য, ক্ষমতা ও শক্তি (Work, Power & Energy)',
+      '6': 'অধ্যায় ৬: শব্দ ও সোনার যন্ত্র (Sound & SONAR)',
+    },
+    'history': {
+      '1': 'অধ্যায় ১: ফরাসি বিপ্লবের কয়েকটি দিক (Aspects of the French Revolution)',
+      '2': 'অধ্যায় ২: নেপোলিয়নীয় সাম্রাজ্য ও জাতীয়তাবাদ (Napoleonic Empire)',
+      '3': 'অধ্যায় ৩: ঊনবিংশ শতকের ইউরোপ (19th Century Europe)',
+      '4': 'অধ্যায় ৪: শিল্পবিপ্লব, উপনিবেশবাদ ও সাম্রাজ্যবাদ (Industrial Revolution)',
+      '5': 'অধ্যায় ৫: প্রথম বিশ্বযুদ্ধ ও তার পরবর্তী ঘটনাবলি (World War I)',
+      '6': 'অধ্যায় ৬: দ্বিতীয় বিশ্বযুদ্ধ ও তার অভিঘাত (World War II)',
+    },
+    'geography': {
+      '1': 'অধ্যায় ১: গ্রহরূপে পৃথিবী (Earth as a Planet)',
+      '2': 'অধ্যায় ২: পৃথিবীর গতিসমূহ: আহ্নিক ও বার্ষিক গতি (Movements of the Earth)',
+      '3': 'অধ্যায় ৩: ভূপৃষ্ঠে কোনো স্থানের অবস্থান নির্ণয় (Determination of Location)',
+      '4': 'অধ্যায় ৪: ভূমিরূপ গঠনকারী প্রক্রিয়া ও বিভিন্ন ভূমিরূপ (Geomorphic Processes)',
+      '5': 'অধ্যায় ৫: আবহবিকার (Weathering)',
+      '6': 'অধ্যায় ৬: দুর্যোগ ও বিপর্যয় (Disasters & Hazards)',
+      '7': 'অধ্যায় ৭: পশ্চিমবঙ্গের ভূগোল ও সম্পদ (Geography of West Bengal)',
+    },
+  },
+  'Class 8': {
+    'science': {
+      '1': 'অধ্যায় ১: বল ও চাপ (Force & Pressure)',
+      '2': 'অধ্যায় ২: আলোর প্রতিফলন ও প্রতিসরণ (Light & Reflection)',
+      '3': 'অধ্যায় ৩: তাপ ও ক্যালোরিমিতি (Heat & Calorimetry)',
+      '4': 'অধ্যায় ৪: পদার্থের প্রকৃতি ও রাসায়নিক বিক্রিয়া (Nature of Matter)',
+      '5': 'অধ্যায় ৫: অণুজীবের জগৎ: ব্যাকটেরিয়া ও ভাইরাস (World of Microorganisms)',
+      '6': 'অধ্যায় ৬: উদ্ভিদের খাদ্য উৎপাদন ও শারীরস্থান (Food Production in Plants)',
+      '7': 'অধ্যায় ৭: মানুষের খাদ্য ও খাদ্য উৎপাদন (Human Food & Production)',
+    },
+    'history': {
+      '1': 'অধ্যায় ১: ইতিহাসের উপাদান ও আধুনিক ভারত (Sources of History)',
+      '2': 'অধ্যায় ২: আঞ্চলিক শক্তির উত্থান: পলাশীর যুদ্ধ (Rise of Regional Powers)',
+      '3': 'অধ্যায় ৩: ঔপনিবেশিক কর্তৃত্ব প্রতিষ্ঠা (Colonial Authority)',
+      '4': 'অধ্যায় ৪: ঔপনিবেশিক অর্থনীতি ও ভূমি রাজস্ব (Colonial Economy)',
+      '5': 'অধ্যায় ৫: ১৮৫৭ সালের মহাবিদ্রোহ (Great Revolt of 1857)',
+      '6': 'অধ্যায় ৬: জাতীয়তাবাদের প্রাথমিক বিকাশ ও কংগ্রেস (National Movement)',
+    },
+    'geography': {
+      '1': 'অধ্যায় ১: পৃথিবীর অন্দরমহল (Interior of the Earth)',
+      '2': 'অধ্যায় ২: পাত সংস্থান ও ভূমিকম্প (Plate Tectonics & Earthquakes)',
+      '3': 'অধ্যায় ৩: শিলা ও শিলাচক্র (Rocks)',
+      '4': 'অধ্যায় ৪: চাপবলয় ও বায়ুপ্রবাহ (Pressure Belts & Winds)',
+      '5': 'অধ্যায় ৫: মেঘ ও বৃষ্টিপাত (Clouds & Precipitation)',
+      '6': 'অধ্যায় ৬: উত্তর ও দক্ষিণ আমেরিকা মহাদেশ (North & South America)',
+    },
+  },
+  'Class 7': {
+    'science': {
+      '1': 'অধ্যায় ১: তাপ ও তাপমাত্রা (Heat & Temperature)',
+      '2': 'অধ্যায় ২: সময় ও গতি (Time & Motion)',
+      '3': 'অধ্যায় ৩: পরমাণু, অণু ও রাসায়নিক বিক্রিয়া (Atoms, Molecules & Chemical Reactions)',
+      '4': 'অধ্যায় ৪: পরিবেশের সজীব উপাদানের গঠন: উদ্ভিদের মূল, কাণ্ড ও পাতা (Living Components)',
+      '5': 'অধ্যায় ৫: মানুষের খাদ্য ও পুষ্টি (Human Food & Nutrition)',
+      '6': 'অধ্যায় ৬: পরিবেশের সংকট, উদ্ভিদ সংরক্ষণ ও পরিবেশবান্ধব শক্তি',
+      '7': 'অধ্যায় ৭: পরিবেশ ও মানবদেহ: ফুসফুস, হৃৎপিণ্ড ও পরিপাকতন্ত্র (Human Body Systems)',
+    },
+    'history': {
+      '1': 'অধ্যায় ১: ভারত ইতিহাসের রূপরেখা ও যুগ বিভাজন (Historical Outline)',
+      '2': 'অধ্যায় ২: ভারতের সামন্ততন্ত্র ও পাল-সেন যুগ (Feudalism & Pala-Sena Era)',
+      '3': 'অধ্যায় ৩: দিল্লি সুলতানি যুগ ও মধ্যযুগীয় অর্থনীতি (Delhi Sultanate)',
+      '4': 'অধ্যায় ৪: মুঘল সাম্রাজ্য: বাবর, আকবর ও রাজস্ব নীতি (Mughal Empire)',
+      '5': 'অধ্যায় ৫: স্থাপত্য, চিত্রকলা ও সংস্কৃতি (Medieval Architecture & Culture)',
+    },
+    'geography': {
+      '1': 'অধ্যায় ১: পৃথিবীর পরিক্রমণ ও ঋতু পরিবর্তন (Revolution of Earth)',
+      '2': 'অধ্যায় ২: ভূপৃষ্ঠের অক্ষরেখা ও দ্রাঘিমারেখা (Parallels & Meridians)',
+      '3': 'অধ্যায় ৩: বায়ুচাপ ও স্থানীয় বায়ুপ্রবাহ (Air Pressure)',
+      '4': 'অধ্যায় ৪: ভূমিরূপ: পর্বত, মালভূমি ও সমভূমি (Landforms)',
+      '5': 'অধ্যায় ৫: নদী ও নদীর বিভিন্ন গতি (Rivers & Courses)',
+      '6': 'অধ্যায় ৬: এশিয়া ও আফ্রিকা মহাদেশ (Asia & Africa)',
+    },
+  },
+  'Class 6': {
+    'science': {
+      '1': 'অধ্যায় ১: আমাদের চারপাশের পরিবর্তন ও ভৌত-রাসায়নিক পরিবর্তন',
+      '2': 'অধ্যায় ২: মৌলিক, যৌগিক ও মিশ্র পদার্থ এবং দ্রবণ পৃথকীকরণ',
+      '3': 'অধ্যায় ৩: মাপজোক বা পরিমাপ ও ক্ষেত্রফল নির্ণয়',
+      '4': 'অধ্যায় ৪: সজীব বস্তুর বৈশিষ্ট্য ও উদ্ভিদের খাদ্যগ্রহণ',
+      '5': 'অধ্যায় ৫: আলো, ছায়া ও গ্রহণ',
+      '6': 'অধ্যায় ৬: আমাদের শরীর ও প্রাথমিক স্বাস্থ্যবিধি',
+    },
+    'history': {
+      '1': 'অধ্যায় ১: প্রাচীন ভারতীয় ইতিহাসের ধারা ও শিকারি-সংগ্রাহক যুগ',
+      '2': 'অধ্যায় ২: হরপ্পা ও সিন্ধু সভ্যতা: উন্নত নগর পরিকল্পনা',
+      '3': 'অধ্যায় ৩: বৈদিক সভ্যতা ও ঋগ্বেদীয় সমাজ',
+      '4': 'অধ্যায় ৪: জনপদ থেকে সাম্রাজ্য ও মৌর্য বংশ (সম্রাট অশোক)',
+    },
+    'geography': {
+      '1': 'অধ্যায় ১: মহাবিশ্ব ও আমাদের সৌরজগৎ',
+      '2': 'অধ্যায় ২: পৃথিবীর আবর্তন ও দিন-রাত্রি সংঘটন',
+      '3': 'অধ্যায় ৩: মানচিত্র পাঠ ও দিক নির্ণয়',
+      '4': 'অধ্যায় ৪: বরফে ঢাকা মহাদেশ অ্যান্টার্কটিকা',
+    },
+  },
+  'Class 5': {
+    'science': {
+      '1': 'অধ্যায় ১: পরিবেশ ও জড় জগত: মাটি, জল ও বায়ুর শুদ্ধতা রক্ষা',
+      '2': 'অধ্যায় ২: আমাদের শরীর: অস্থিসন্ধি, পেশি ও ত্বকের সুরক্ষা',
+      '3': 'অধ্যায় ৩: উদ্ভিদ ও প্রাণীর বৈচিত্র্য: স্থানীয় পাখি ও ঔষধি গাছ',
+      '4': 'অধ্যায় ৪: আবহাওয়া ও পরিবেশের ভারসাম্য রক্ষা',
+    },
+    'history': {
+      '1': 'অধ্যায় ১: বাংলার ঐতিহাসিক স্থান ও ঐতিহ্য (মুর্শিদাবাদ, টেরাকোটা)',
+      '2': 'অধ্যায় ২: ভারতের স্বাধীনতা সংগ্রামের পুরোধা ব্যক্তিত্ব ও নেতাজি',
+    },
+    'geography': {
+      '1': 'অধ্যায় ১: পশ্চিমবঙ্গের নদ-নদী: তিস্তা, রূপনারায়ণ ও গঙ্গা',
+      '2': 'অধ্যায় ২: আমাদের আশপাশের প্রাকৃতিক পরিবেশ ও মাটি',
+    },
+  },
+};
+
+/**
+ * Resolves a numbered chapter request (e.g. "chapter 3", "ch 8.6", "অধ্যায় ২") to full syllabus chapter name
+ */
+export function resolveWbbseChapter(className: string = 'Class 10', subject: string = 'বিজ্ঞান', chapterNum: string): string | null {
+  const normCls = className || 'Class 10';
+  let normSubj = 'science';
+  if (subject.includes('ইতিহাস') || subject.toLowerCase().includes('history')) normSubj = 'history';
+  else if (subject.includes('ভূগোল') || subject.toLowerCase().includes('geography')) normSubj = 'geography';
+
+  const bengaliDigits: Record<string, string> = { '০': '0', '১': '1', '২': '2', '৩': '3', '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9' };
+  const cleanNum = chapterNum.replace(/[০-৯]/g, (d) => bengaliDigits[d] || d).trim();
+
+  const classData = WBBSE_CHAPTER_NUM_MAP[normCls];
+  if (classData && classData[normSubj]) {
+    if (classData[normSubj][cleanNum]) {
+      return classData[normSubj][cleanNum];
+    }
+    const intNum = parseInt(cleanNum, 10).toString();
+    if (classData[normSubj][intNum]) {
+      return classData[normSubj][intNum];
+    }
+  }
+  return null;
 }

@@ -299,8 +299,8 @@ export const AudioOrb: React.FC<AudioOrbProps> = ({
         className="pointer-events-none absolute z-10"
       />
 
-      {/* Central State Indicator Badge */}
-      <div className="relative z-20 flex flex-col items-center justify-center pointer-events-none px-3 py-1 rounded-full bg-slate-950/70 backdrop-blur-md border border-slate-700/60 shadow-xl">
+      {/* Central State Indicator Badge - Seamlessly blended into background, zero boxed appearance */}
+      <div className="relative z-20 flex flex-col items-center justify-center pointer-events-none px-3 py-0.5 rounded-full bg-slate-950/30 backdrop-blur-[2px] border-0 shadow-none">
         <span className="text-[11px] font-bold uppercase tracking-wider text-white drop-shadow flex items-center gap-1.5">
           {status === 'connecting' && (
             <>

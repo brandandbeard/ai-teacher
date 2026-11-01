@@ -273,6 +273,21 @@ export default function App() {
     if (!isAutoRenew) {
       lastResumptionHandleRef.current = null;
       conversationStateMachine.setResumptionHandle(null);
+
+      // Random chapter selection on every fresh live call connect
+      if (activeSection === 'wbbse') {
+        const cls = selectedClass || 'Class 10';
+        const subj = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
+        const freshTopic = conversationStateMachine.pickRandomTopic(subj, cls);
+        conversationStateMachine.setTeachingMode(teachingMode, cls, subj);
+        conversationStateMachine.setTopic(freshTopic);
+        setActiveContext(conversationStateMachine.getContext());
+      } else {
+        const freshTopic = conversationStateMachine.pickRandomTopic(selectedCompetitiveSubject);
+        conversationStateMachine.setTeachingMode(teachingMode, undefined, selectedCompetitiveSubject);
+        conversationStateMachine.setTopic(freshTopic);
+        setActiveContext(conversationStateMachine.getContext());
+      }
     }
 
     setErrorMessage(null);
@@ -447,12 +462,14 @@ export default function App() {
             // Append model speech transcript and update state machine
             appendOrUpdateTranscript('gemini', msg.text);
             conversationStateMachine.processModelOutput(msg.text);
+            setActiveContext({ ...conversationStateMachine.getContext() });
           }
 
           if (msg.type === 'user_transcript' && msg.text) {
             // Student audio transcription from Gemini Live
             appendOrUpdateTranscript('user', msg.text);
             conversationStateMachine.processStudentInput(msg.text);
+            setActiveContext({ ...conversationStateMachine.getContext() });
           }
 
           if (msg.type === 'tool_call') {
@@ -750,6 +767,7 @@ export default function App() {
     clearInactivityTimer();
     addTranscript('user', cleanText);
     conversationStateMachine.processStudentInput(cleanText);
+    setActiveContext({ ...conversationStateMachine.getContext() });
 
     // Stop current AI audio immediately so it responds right away to student's text
     audioPlayerRef.current?.stopAndClear();
@@ -890,10 +908,9 @@ export default function App() {
     }
   };
 
-  // Context-aware Next handler: maintains active translation drill or advances to next curriculum topic
-  const handleNextClick = () => {
+  // 1. Next Step in flow (within current topic: next question in quiz, or next concept in lecture)
+  const handleNextStepClick = () => {
     const ctx = conversationStateMachine.getContext();
-    const isSpoken = ctx.personaId === 'shreya-maam' || ctx.subject === 'Spoken English';
     const isTranslation =
       ctx.currentTopic?.toLowerCase().includes('translation') ||
       ctx.teachingModeLabel === 'অনুবাদ অনুশীলন' ||
@@ -906,25 +923,30 @@ export default function App() {
       return;
     }
 
-    if (isSpoken) {
-      if (teachingMode === 'quiz') {
-        sendQuickActionMessage('পরের স্পোকেন ইংলিশ প্রশ্ন বা ইংরেজি অনুশীলনের বাক্যটি দিন।');
-      } else {
-        const nextTopic = conversationStateMachine.pickRandomTopic('Spoken English');
-        sendQuickActionMessage(`চমৎকার! এবার পরের টপিক "${nextTopic}" নিয়ে আলোচনা বা স্পিকিং প্র্যাকটিস শুরু করুন।`);
-      }
-      return;
-    }
-
     if (teachingMode === 'quiz') {
       sendQuickActionMessage('পরের প্রশ্নটি জিজ্ঞাসা করো');
+    } else if (teachingMode === 'doubts') {
+      sendQuickActionMessage('পরবর্তী বিষয়ে চলে যাও বা পরের ধারণাটি বুঝিয়ে বলো');
     } else {
+      sendQuickActionMessage('এই বিষয়ের পরবর্তী গুরুত্বপূর্ণ অংশ বা মূল পয়েন্টটি বিশদে বুঝিয়ে বলো।');
+    }
+  };
+
+  // 2. Next Topic (switches to a fresh new chapter/topic in the syllabus)
+  const handleNextTopicClick = () => {
+    let nextTopic: string;
+    if (activeSection === 'wbbse') {
       const cls = selectedClass || 'Class 10';
       const subj = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
-      const nextTopic = activeSection === 'wbbse'
-        ? conversationStateMachine.pickRandomTopic(subj, cls)
-        : conversationStateMachine.pickRandomTopic(selectedCompetitiveSubject);
-      sendQuickActionMessage(`এবার পরের বিষয় "${nextTopic}" নিয়ে বিশদে একটানা আলোচনা শুরু করো।`);
+      nextTopic = conversationStateMachine.pickRandomTopic(subj, cls);
+      conversationStateMachine.setTopic(nextTopic);
+      setActiveContext(conversationStateMachine.getContext());
+      sendQuickActionMessage(`[পরের অধ্যায়]: এবার আমরা নতুন অধ্যায় "${nextTopic}" শুরু করব। এই অধ্যায়ের মূল বিষয়বস্তু আলোচনা করো।`);
+    } else {
+      nextTopic = conversationStateMachine.pickRandomTopic(selectedCompetitiveSubject);
+      conversationStateMachine.setTopic(nextTopic);
+      setActiveContext(conversationStateMachine.getContext());
+      sendQuickActionMessage(`[পরের টপিক]: এবার আমরা নতুন বিষয় "${nextTopic}" শুরু করব। এই বিষয়ে বিস্তারিত আলোচনা করো।`);
     }
   };
 
@@ -955,10 +977,21 @@ export default function App() {
               <span className="text-[10px] sm:text-xs text-slate-500 hidden sm:inline">-By Arif Hussain</span>
               {/* Prominent Active Topic in Top Heading */}
               {activeContext.currentTopic && (
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-950/90 border border-emerald-500/50 text-emerald-300 text-[11px] font-bold truncate max-w-[150px] sm:max-w-[280px] shadow-sm animate-in fade-in">
-                  <span className="text-emerald-400">📖 টপিক:</span>
-                  <span className="truncate">{activeContext.currentTopic}</span>
-                </span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-950/90 border border-emerald-500/50 text-emerald-300 text-[11px] font-bold truncate max-w-[120px] sm:max-w-[240px] shadow-sm animate-in fade-in">
+                    <span className="text-emerald-400">📖 টপিক:</span>
+                    <span className="truncate">{activeContext.currentTopic}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleNextTopicClick}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-emerald-900/80 hover:bg-emerald-800 border border-emerald-500/50 text-emerald-200 hover:text-white text-[10px] font-bold transition-all shadow-sm active:scale-95 shrink-0"
+                    title="পরের টপিকে যান (Next Topic)"
+                  >
+                    <span>⏭️</span>
+                    <span className="hidden sm:inline">পরের টপিক</span>
+                  </button>
+                </div>
               )}
             </div>
             <p className="text-[10px] sm:text-[11px] text-slate-400 truncate hidden xs:block">
@@ -1069,12 +1102,23 @@ export default function App() {
                 <strong className="text-white font-mono">{voice}</strong>
               </span>
               {activeContext.currentTopic ? (
-                <span className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-950/90 to-slate-900/90 border border-emerald-500/50 text-emerald-200 px-2.5 py-1 rounded-md text-[11px] sm:text-xs shadow-sm max-w-[170px] sm:max-w-[320px]">
-                  <BookOpen className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                  <span className="font-bold truncate text-emerald-100" title={activeContext.currentTopic}>
-                    {activeContext.currentTopic}
+                <div className="flex items-center gap-1 max-w-[240px] sm:max-w-[380px]">
+                  <span className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-950/90 to-slate-900/90 border border-emerald-500/50 text-emerald-200 px-2.5 py-1 rounded-md text-[11px] sm:text-xs shadow-sm truncate">
+                    <BookOpen className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    <span className="font-bold truncate text-emerald-100" title={activeContext.currentTopic}>
+                      {activeContext.currentTopic}
+                    </span>
                   </span>
-                </span>
+                  <button
+                    type="button"
+                    onClick={handleNextTopicClick}
+                    className="flex items-center gap-1 bg-emerald-900/70 hover:bg-emerald-800 border border-emerald-500/50 text-emerald-200 px-2 py-1 rounded-md text-[11px] font-semibold transition-all shadow-sm active:scale-95 shrink-0"
+                    title="পরের অধ্যায় বা টপিকে যান (Next Topic)"
+                  >
+                    <span>⏭️</span>
+                    <span>পরের টপিক</span>
+                  </button>
+                </div>
               ) : (
                 <span className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-md text-[11px] sm:text-xs">
                   <BookOpen className="h-3.5 w-3.5 text-slate-500 shrink-0" />
@@ -1137,10 +1181,10 @@ export default function App() {
               size={typeof window !== 'undefined' && window.innerWidth < 450 ? (callStatus === 'idle' ? 180 : 120) : (callStatus === 'idle' ? 240 : 170)}
             />
 
-            {/* Live In-Call Mode Indicator & Switcher */}
+            {/* Live In-Call Mode Indicator & Switcher & Next Topic Button */}
             {callStatus !== 'idle' && (
-              <div className="mt-2.5 flex items-center gap-1.5 sm:gap-2 p-1 sm:p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-xl backdrop-blur-md">
-                <span className="text-[10px] text-slate-400 font-semibold px-2 hidden sm:inline">পড়ার মোড:</span>
+              <div className="mt-2.5 flex flex-wrap items-center justify-center gap-1 sm:gap-2 p-1 sm:p-1.5 rounded-2xl sm:rounded-full bg-slate-950/40 border border-slate-800/40 backdrop-blur-sm shadow-none max-w-full">
+                <span className="text-[10px] text-slate-400 font-semibold px-1.5 hidden sm:inline">পড়ার মোড:</span>
                 <button
                   type="button"
                   onClick={() => handleSelectMode('lecture')}
@@ -1179,6 +1223,19 @@ export default function App() {
                 >
                   <span>📝</span>
                   <span>প্রশ্ন উত্তর</span>
+                </button>
+
+                <div className="h-4 w-px bg-slate-700/60 mx-0.5 hidden xs:block" />
+
+                {/* 📖 Next Topic button placed right beside Reading Modes */}
+                <button
+                  type="button"
+                  onClick={handleNextTopicClick}
+                  className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 sm:gap-1.5 bg-gradient-to-r from-teal-600/30 to-emerald-600/30 hover:from-teal-600/50 hover:to-emerald-600/50 border border-teal-500/50 text-teal-200 hover:text-white transition-all shadow-sm active:scale-95"
+                  title="পরের নতুন অধ্যায় বা বিষয়ে যাও (Next Topic / Chapter)"
+                >
+                  <span>📖</span>
+                  <span>পরের টপিক</span>
                 </button>
               </div>
             )}
@@ -1525,17 +1582,22 @@ export default function App() {
                 </div>
               )}
 
-              {/* Quick Action Touch Buttons directly above Chat Input */}
+              {/* Quick Action Touch Buttons directly above Chat Input - Exactly 3 balanced buttons */}
               <div className="w-full max-w-xl grid grid-cols-3 gap-1.5 sm:gap-2 px-0.5">
+                {/* 1. Next in flow (moves to next question in quiz, or next part of lesson in discussion) */}
                 <button
                   type="button"
-                  onClick={handleNextClick}
+                  onClick={handleNextStepClick}
                   className="w-full py-2 px-1 sm:px-2 rounded-xl border border-cyan-500/40 bg-cyan-950/50 hover:bg-cyan-900/60 active:scale-95 text-cyan-200 text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 shadow-sm transition-all min-w-0"
-                  title="পরের বিষয় বা প্রশ্ন"
+                  title={teachingMode === 'quiz' ? 'পরের প্রশ্নটি জিজ্ঞাসা করো' : 'এই বিষয়ের পরের পয়েন্টটি আলোচনা করো'}
                 >
                   <span className="text-sm sm:text-xs shrink-0">⏭️</span>
-                  <span className="truncate text-center">Next (পরের বিষয়)</span>
+                  <span className="truncate text-center">
+                    {teachingMode === 'quiz' ? 'Next (পরের প্রশ্ন)' : 'Next (পরের অংশ)'}
+                  </span>
                 </button>
+
+                {/* 2. Repeat */}
                 <button
                   type="button"
                   onClick={() =>
@@ -1547,6 +1609,8 @@ export default function App() {
                   <span className="text-sm sm:text-xs shrink-0">🔁</span>
                   <span className="truncate text-center">Repeat (আবার বলো)</span>
                 </button>
+
+                {/* 3. Detail */}
                 <button
                   type="button"
                   onClick={() =>
@@ -1887,21 +1951,22 @@ export default function App() {
 
           {/* Quick Action Touch Buttons & Chat for Mobile */}
           <div className="pt-2 border-t border-slate-800 space-y-2">
-            <div className="flex items-center justify-between gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               <button
                 type="button"
-                onClick={handleNextClick}
-                className="flex-1 py-1.5 px-1.5 rounded-lg border border-cyan-500/40 bg-cyan-950/60 active:scale-95 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm"
+                onClick={handleNextStepClick}
+                className="py-1.5 px-1 rounded-lg border border-cyan-500/40 bg-cyan-950/60 active:scale-95 text-cyan-200 text-[11px] font-semibold flex items-center justify-center gap-0.5 shadow-sm truncate"
+                title={teachingMode === 'quiz' ? 'পরের প্রশ্ন' : 'পরের অংশ'}
               >
                 <span>⏭️</span>
-                <span>Next</span>
+                <span>{teachingMode === 'quiz' ? 'Next প্রশ্ন' : 'Next অংশ'}</span>
               </button>
               <button
                 type="button"
                 onClick={() =>
                   sendQuickActionMessage('আগের বিষয়টি আরেকবার সহজ করে সুন্দরভাবে বুঝিয়ে দাও')
                 }
-                className="flex-1 py-1.5 px-1.5 rounded-lg border border-amber-500/40 bg-amber-950/60 active:scale-95 text-amber-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm"
+                className="py-1.5 px-1 rounded-lg border border-amber-500/40 bg-amber-950/60 active:scale-95 text-amber-200 text-[11px] font-semibold flex items-center justify-center gap-0.5 shadow-sm truncate"
               >
                 <span>🔁</span>
                 <span>Repeat</span>
@@ -1915,7 +1980,7 @@ export default function App() {
                       : 'এই বিষয়টি আরেকটু গভীরে গিয়ে উদাহরণসহ বুঝিয়ে দাও'
                   )
                 }
-                className="flex-1 py-1.5 px-1.5 rounded-lg border border-purple-500/40 bg-purple-950/60 active:scale-95 text-purple-200 text-xs font-semibold flex items-center justify-center gap-1 shadow-sm"
+                className="py-1.5 px-1 rounded-lg border border-purple-500/40 bg-purple-950/60 active:scale-95 text-purple-200 text-[11px] font-semibold flex items-center justify-center gap-0.5 shadow-sm truncate"
               >
                 <span>❓</span>
                 <span>Detail</span>

@@ -1,5 +1,5 @@
 import { ConversationState, TeachingContextSummary, StudentIntentType, TeachingMode } from '../types/conversation.ts';
-import { getRandomTopic } from '../data/randomTopics.ts';
+import { getRandomTopic, resolveWbbseChapter } from '../data/randomTopics.ts';
 
 export interface StudentIntentResult {
   type: StudentIntentType;
@@ -296,37 +296,93 @@ export class ConversationStateMachine {
       }
     }
 
-    // Extract topic
+    // Check for generic topic change request (e.g. "টপিক চেঞ্জ করো", "অন্য টপিক পড়াও", "change topic")
+    const isGenericTopicChange =
+      lower.includes('topic change') ||
+      lower.includes('টপিক চেঞ্জ') ||
+      lower.includes('টপিক পরিবর্তন') ||
+      lower.includes('change topic') ||
+      lower.includes('next topic') ||
+      lower.includes('পরের টপিক') ||
+      lower.includes('অন্য টপিক') ||
+      lower.includes('নতুন টপিক') ||
+      lower.includes('অন্য চ্যাপ্টার') ||
+      lower.includes('পরের চ্যাপ্টার') ||
+      lower.includes('অন্য অধ্যায়') ||
+      lower.includes('পরের অধ্যায়');
+
+    // Extract numbered chapter if student mentions "chapter 3", "ch 3", "ch3", "অধ্যায় ৩", "চ্যাপ্টার ৩", "৩ নম্বর অধ্যায়", etc.
+    const chapterNumMatch =
+      text.match(/(?:chapter|ch|অধ্যায়|অধ্যায়|চ্যাপ্টার)\s*([0-9]+(?:\.[0-9]+)?|[০-৯]+(?:\.[০-৯]+)?)/i) ||
+      text.match(/([0-9]+|[০-৯]+)\s*(?:নম্বর|নং)?\s*(?:অধ্যায়|অধ্যায়|চ্যাপ্টার)/i);
+
     let identifiedTopic: string | null = null;
-    if (!isSpokenEnglish) {
-      if (/বয়েল|boyle/i.test(text)) {
+
+    if (chapterNumMatch && chapterNumMatch[1]) {
+      const resolved = resolveWbbseChapter(this.context.classGrade, this.context.subject, chapterNumMatch[1]);
+      if (resolved) {
+        identifiedTopic = resolved;
+        this.context.chapter = `অধ্যায় ${chapterNumMatch[1]}`;
+      }
+    }
+
+    if (!identifiedTopic && !isSpokenEnglish) {
+      if (/জৈব\s*রসায়ন|organic\s*chem|হাইড্রোকার্বন|মিথেন|ইথিলিন|পলিমার/i.test(text)) {
+        identifiedTopic = 'জৈব রসায়ন (Organic Chemistry)';
+      } else if (/অজৈব\s*রসায়ন|inorganic\s*chem|অ্যামোনিয়া|হাইড্রোজেন সালফাইড/i.test(text)) {
+        identifiedTopic = 'অজৈব রসায়ন ও শিল্প প্রস্তুতি';
+      } else if (/পর্যায়\s*সারণী|periodic\s*table|মেন্ডেলিফ|অষ্টক নিয়ম/i.test(text)) {
+        identifiedTopic = 'পর্যায় সারণী ও রাসায়নিক বন্ধন';
+      } else if (/ধাতুবিদ্যা|metallurgy|আকরিক/i.test(text)) {
+        identifiedTopic = 'ধাতুবিদ্যা ও আকরিক নিষ্কাশন';
+      } else if (/রাসায়নিক\s*গণনা|chemical\s*calculations/i.test(text)) {
+        identifiedTopic = 'রাসায়নিক গণনা (Chemical Calculations)';
+      } else if (/বংশগতি|মেন্ডেল|জিনগত\s*রোগ/i.test(text)) {
+        identifiedTopic = 'বংশগতি এবং কয়েকটি সাধারণ জিনগত রোগ';
+      } else if (/অভিব্যক্তি|ডারউইন|অভিযোজন/i.test(text)) {
+        identifiedTopic = 'অভিব্যক্তি ও অভিযোজন';
+      } else if (/বয়েল|বয়েল|boyle/i.test(text)) {
         identifiedTopic = "Boyle's Law & Gas Behavior";
-      } else if (/চার্লস|charles/i.test(text)) {
+      } else if (/চার্লস|চার্লসের|charles/i.test(text)) {
         identifiedTopic = "Charles's Law & Absolute Zero";
       } else if (/অ্যাভোগাড্রো|avogadro/i.test(text)) {
         identifiedTopic = "Avogadro's Hypothesis";
-      } else if (/কোষ|cell|সালোকসংশ্লেষ|photosynthesis|ডিএনএ|dna|জিন|genetics/i.test(text)) {
+      } else if (/কোষ|cell|সালোকসংশ্লেষ|photosynthesis|ডিএনএ|dna|জিন|genetics|মাইটোকনড্রিয়া|প্লাস্টিড/i.test(text)) {
         identifiedTopic = 'Cell Division / Photosynthesis (Life Science)';
-      } else if (/আলো|optics|light|প্রতিসরণ|প্রতিফলন/i.test(text)) {
+      } else if (/(?:^|[\s(])আলোর?(?:[\s),.!?]|$)|optics|light|প্রতিসরণ|প্রতিফলন|দর্পণ|লেন্স|বিচ্ছুরণ/i.test(text) && !/আলোচনা|আলোচিত/i.test(text.replace(/(?:^|[\s(])আলোর?(?:[\s),.!?]|$)/i, ''))) {
         identifiedTopic = 'আলো (Light)';
-      } else if (/চলতড়িৎ|electricity|ওহম|ohm|কারেন্ট|ভোল্টেজ/i.test(text)) {
+      } else if (/চলতড়িৎ|চলতড়িৎ|electricity|ওহম|ohm|কারেন্ট|ভোল্টেজ|রোধ/i.test(text)) {
         identifiedTopic = 'চলতড়িৎ (Current Electricity)';
-      } else if (/পলাশী|plassey/i.test(text)) {
+      } else if (/পরমাণু|অণু|আণবিক|পরমাণুর গঠন|রাদারফোর্ড|বোর/i.test(text)) {
+        identifiedTopic = 'পরমাণুর গঠন ও রাসায়নিক বন্ধন';
+      } else if (/তাপ|তাপমাত্রা|ক্যালোরিমিতি|থার্মোমিটার|সেলসিয়াস|ফারেনহাইট/i.test(text)) {
+        identifiedTopic = 'তাপ ও তাপমাত্রা (Heat & Temperature)';
+      } else if (/মানবদেহ|ফুসফুস|পরিপাক|রক্তসংবহন|হৃৎপিণ্ড|রক্তের গ্রুপ/i.test(text)) {
+        identifiedTopic = 'মানবদেহের প্রধান অঙ্গ ও শারীরস্থান';
+      } else if (/বল ও গতি|গতিসূত্র|নিউটনের|ভরবেগ/i.test(text)) {
+        identifiedTopic = 'বল ও গতি (Force and Motion)';
+      } else if (/সান্দ্রতা|পৃষ্ঠটান|আর্কিমিডিস|প্লাবতা/i.test(text)) {
+        identifiedTopic = 'পদার্থের গঠন ও ধর্ম';
+      } else if (/শব্দ|প্রতিধ্বনি|সোনার|sonar/i.test(text)) {
+        identifiedTopic = 'শব্দ ও তরঙ্গ (Sound & Waves)';
+      } else if (/পলাশী|পলাশির|plassey|বক্সার/i.test(text)) {
         identifiedTopic = 'পলাশীর যুদ্ধ (Battle of Plassey)';
       } else if (/মহাবিদ্রোহ|সিপাহী|1857|১৮৫৭/i.test(text)) {
         identifiedTopic = '১৮৫৭-র মহাবিদ্রোহ';
-      } else if (/সংবিধান|constitution|মৌলিক\s*অধিকার|fundamental\s*rights|preamble|প্রস্তাবনা|নাগরিকত্ব/i.test(text)) {
+      } else if (/সংবিধান|constitution|মৌলিক\s*অধিকার|fundamental\s*rights|preamble|প্রস্তাবনা|নাগরিকত্ব|রাষ্ট্রপতি|সংসদ/i.test(text)) {
         identifiedTopic = 'Indian Constitution & Fundamental Rights';
-      } else if (/অর্থনীতি|economy|rbi|মুদ্রাস্ফীতি|inflation|gdp|মুদ্রা|ব্যাংক/i.test(text)) {
+      } else if (/অর্থনীতি|economy|rbi|মুদ্রাস্ফীতি|inflation|gdp|জিডিপি|মুদ্রা|ব্যাংক|বাজেট/i.test(text)) {
         identifiedTopic = 'Indian Economy & Banking System';
-      } else if (/মুঘল|mughal|বাবর|আকবর|সুলতানি|sultanate|মধ্যযুগ/i.test(text)) {
+      } else if (/মুঘল|মোগল|mughal|বাবর|আকবর|সুলতানি|sultanate|মধ্যযুগ/i.test(text)) {
         identifiedTopic = 'Mughal Empire & Medieval India';
-      } else if (/সিন্ধু|হরপ্পা|indus|harappa|মহেঞ্জোদাড়ো/i.test(text)) {
+      } else if (/সিন্ধু|হরপ্পা|indus|harappa|মহেঞ্জোদাড়ো|মহেঞ্জোদারো/i.test(text)) {
         identifiedTopic = 'Indus Valley Civilization & Ancient India';
       } else if (/নদী|হিমবাহ|বায়ুমণ্ডল|climate|glacier|জলবায়ু|বায়ুপ্রবাহ/i.test(text)) {
         identifiedTopic = 'ভূগোল ও প্রাকৃতিক ভূমিরূপ';
+      } else if (/মহাকাশ|ইসরো|isro|চন্দ্রযান|ডিআরডিও|drdo|মিসাইল|পারমাণবিক/i.test(text)) {
+        identifiedTopic = 'Science & Technology: ISRO, Space & Nuclear Tech';
       }
-    } else {
+    } else if (!identifiedTopic) {
       if (lower.includes('email') || lower.includes('workplace') || lower.includes('business')) {
         identifiedTopic = 'Professional Workplace Email Writing & Polite Business Dialogue';
       } else if (lower.includes('idiom') || lower.includes('phrasal')) {
@@ -344,17 +400,22 @@ export class ConversationStateMachine {
       }
     }
 
-    // Direct topic extraction if user explicitly says "Topic: X", "Explain X", "Let's study X", "আমার টপিক X", "... নিয়ে আলোচনা করো", "... সম্পর্কে বলো"
+    // Direct topic extraction if user explicitly says "Topic: X", "Explain X", "Let's study X", "আমার টপিক X", "[Topic] নিয়ে আলোচনা করো", "[Topic] আলোচনা করো", "[Topic] বলো", "[Topic] পড়াও"
     if (!identifiedTopic) {
       const explicitTopicMatch =
-        text.match(/(?:topic|টপিক|বিষয়|বিষয়|chapter|অধ্যায়|learn|study|explain|পড়াও|আলোচনা\s*করো)\s*[:：\-]?\s*([A-Za-z0-9\s\u0980-\u09FF\-\'’]{3,40})/i) ||
-        text.match(/([A-Za-z0-9\s\u0980-\u09FF\-\'’]{3,40})\s*(?:নিয়ে\s*আলোচনা|সম্পর্কে\s*বলো|বোঝাও|পড়াও|নিয়ে\s*পড়াও|শুরু\s*করো)/i);
+        text.match(/(?:topic|টপিক|বিষয়|বিষয়|chapter|ch|অধ্যায়|অধ্যায়|চ্যাপ্টার|learn|study|explain|পড়াও|পড়ব|পড়বো|আলোচনা\s*করো)\s*[:：\-]?\s*([A-Za-z0-9\s\u0980-\u09FF\-\'’]{2,40})/i) ||
+        text.match(/([A-Za-z0-9\s\u0980-\u09FF\-\'’]{2,40})\s*(?:(?:নিয়ে\s*)?আলোচনা(?:\s*করো)?|সম্পর্কে\s*বলো|সম্পর্কে\s*পড়াও|নিয়ে\s*বলো|বোঝাও|পড়াও|পড়ব|পড়বো|নিয়ে\s*পড়াও|শুরু\s*করো)/i);
       if (explicitTopicMatch && explicitTopicMatch[1]) {
         const candidate = explicitTopicMatch[1].trim();
-        if (candidate.length >= 3 && !/^(করো|বলো|দাও|হবে|please|now|এবার|এখন)$/i.test(candidate)) {
+        if (candidate.length >= 2 && !/^(করো|বলো|দাও|হবে|please|now|এবার|এখন|কথা|কি|কী)$/i.test(candidate)) {
           identifiedTopic = candidate;
         }
       }
+    }
+
+    // If generic topic change was requested and still no specific topic extracted, pick a random fresh topic
+    if (!identifiedTopic && isGenericTopicChange) {
+      identifiedTopic = this.pickRandomTopic(this.context.subject, this.context.classGrade);
     }
 
     // If currently in translation drill, student input is an answer
@@ -400,12 +461,16 @@ export class ConversationStateMachine {
 
     const isTopicSwitch = Boolean(
       (previousTopic && identifiedTopic && previousTopic !== identifiedTopic) ||
+      identifiedTopic ||
       lower.includes('এবার') ||
       lower.includes('এখন') ||
       lower.includes('পরের') ||
       lower.includes('next') ||
       lower.includes('বলো') ||
-      lower.includes('পড়াও')
+      lower.includes('পড়াও') ||
+      lower.includes('learn') ||
+      lower.includes('teach') ||
+      lower.includes('study')
     );
 
     this.context.isLessonStarted = true;

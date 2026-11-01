@@ -112,6 +112,54 @@ export function attachLiveServer(httpServer: any, middlewareApp?: any) {
         return;
       }
 
+      if (url.pathname === "/api/lookup-chapter" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", async () => {
+          try {
+            const { className = "Class 10", subject = "বিজ্ঞান", query = "" } = JSON.parse(body || "{}");
+            const apiKey = getApiKey();
+            if (!apiKey) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "GEMINI_API_KEY is not configured" }));
+              return;
+            }
+
+            const ai = new GoogleGenAI({
+              apiKey,
+              httpOptions: {
+                headers: {
+                  "User-Agent": "aistudio-build",
+                },
+              },
+            });
+
+            const prompt = `You are a West Bengal Board of Secondary Education (WBBSE) syllabus curriculum expert.
+The user is asking about: "${query}" for ${className} in subject "${subject}".
+Identify the exact official WBBSE syllabus chapter title and core topics in Bengali (বাংলা).
+Return ONLY a short clean title string like "অধ্যায় ৩: পদার্থের অবস্থা ও গ্যাসীয় আচরণ" or "জৈব রসায়ন: হাইড্রোকার্বন ও কার্যকরী মূলক".`;
+
+            const response = await ai.models.generateContent({
+              model: "gemini-2.5-flash",
+              contents: prompt,
+            });
+
+            const resolvedTitle = response.text?.trim().replace(/^["']|["']$/g, "") || query;
+            res.setHeader("Content-Type", "application/json");
+            res.statusCode = 200;
+            res.end(JSON.stringify({ resolvedTitle, className, subject, query }));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message || "Failed to lookup chapter" }));
+          }
+        });
+        return;
+      }
+
       next();
     });
   }
