@@ -405,6 +405,19 @@ test('Scenario W: Custom topic provided before call start initializes context an
   assert.match(instruction, /Active Topic to teach: জৈব রসায়ন/);
 });
 
+test('Scenario X: Disconnecting call (clearTopic) resets currentTopic to null and clears state', () => {
+  const sm = new ConversationStateMachine();
+  sm.setTopic('Bengali to English Hard Translation Drill');
+  assert.equal(sm.getContext().currentTopic, 'Bengali to English Hard Translation Drill');
+
+  // Call ends
+  sm.clearTopic();
+  assert.equal(sm.getContext().currentTopic, null);
+  assert.equal(sm.getContext().chapter, undefined);
+  assert.equal(sm.getContext().isLessonStarted, false);
+});
+
+
 
 
 

@@ -100,6 +100,15 @@ export class ConversationStateMachine {
     this.notify();
   }
 
+  public clearTopic() {
+    this.context.currentTopic = null;
+    this.context.chapter = undefined;
+    this.context.isLessonStarted = false;
+    this.context.pendingQuestion = undefined;
+    this.context.popQuizPending = false;
+    this.notify();
+  }
+
   public isWaitingForStudent(): boolean {
     return this.context.conversationState === 'WAITING_FOR_STUDENT' || Boolean(this.context.pendingQuestion);
   }
@@ -594,7 +603,7 @@ export class ConversationStateMachine {
     return topic;
   }
 
-  public setTeachingMode(mode: TeachingMode, classGrade?: string, subject?: string) {
+  public setTeachingMode(mode: TeachingMode, classGrade?: string, subject?: string, autoPickTopic: boolean = false) {
     this.context.teachingMode = mode;
     this.context.teachingModeLabel = mode === 'lecture' ? 'আলোচনা' : mode === 'doubts' ? 'AI কে প্রশ্ন' : 'প্রশ্ন উত্তর';
     this.context.classGrade = classGrade;
@@ -602,10 +611,9 @@ export class ConversationStateMachine {
     if (subject) {
       this.context.subject = subject;
     }
-    if (!this.context.currentTopic) {
+    if (autoPickTopic && !this.context.currentTopic) {
       this.pickRandomTopic(this.context.subject, this.context.classGrade);
     }
-    this.context.isLessonStarted = true;
     this.notify();
   }
 

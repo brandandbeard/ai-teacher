@@ -658,6 +658,11 @@ export default function App() {
     setUserVolume(0);
     setAiVolume(0);
     setStatusMessage('Call ended. Ready to connect.');
+
+    // Clear and reset topic immediately on call disconnect
+    conversationStateMachine.clearTopic();
+    setActiveContext({ ...conversationStateMachine.getContext() });
+    setCustomStartingTopic('');
   };
 
   // Toggle Mic
@@ -856,9 +861,11 @@ export default function App() {
     // Clear old session resume handle so previous subject never bleeds in
     lastResumptionHandleRef.current = null;
     conversationStateMachine.setResumptionHandle(null);
-    const initialTopic = conversationStateMachine.pickRandomTopic(subjectName, cls);
     conversationStateMachine.setTeachingMode(teachingMode, cls, subjectName);
-    conversationStateMachine.setTopic(initialTopic);
+    if (callStatus !== 'idle') {
+      const initialTopic = conversationStateMachine.pickRandomTopic(subjectName, cls);
+      conversationStateMachine.setTopic(initialTopic);
+    }
     setActiveContext(conversationStateMachine.getContext());
   };
 
@@ -875,9 +882,11 @@ export default function App() {
     setVoice(defaultVoice);
     setSystemInstruction(prompt);
     conversationStateMachine.updatePersona(prompt);
-    const initialTopic = conversationStateMachine.pickRandomTopic(subjectName, selectedClass || 'Class 10');
     conversationStateMachine.setTeachingMode(teachingMode, selectedClass, subjectName);
-    conversationStateMachine.setTopic(initialTopic);
+    if (callStatus !== 'idle') {
+      const initialTopic = conversationStateMachine.pickRandomTopic(subjectName, selectedClass || 'Class 10');
+      conversationStateMachine.setTopic(initialTopic);
+    }
     setActiveContext(conversationStateMachine.getContext());
   };
 
@@ -892,9 +901,11 @@ export default function App() {
     setSystemInstruction(compSubj.prompt);
     conversationStateMachine.updatePersona(compSubj.prompt);
     // Explicitly pass undefined for classGrade so school class never attaches to competitive/spoken
-    const initialTopic = conversationStateMachine.pickRandomTopic(compSubj.title);
     conversationStateMachine.setTeachingMode(teachingMode, undefined, compSubj.title);
-    conversationStateMachine.setTopic(initialTopic);
+    if (callStatus !== 'idle') {
+      const initialTopic = conversationStateMachine.pickRandomTopic(compSubj.title);
+      conversationStateMachine.setTopic(initialTopic);
+    }
     setActiveContext(conversationStateMachine.getContext());
   };
 
@@ -1134,16 +1145,8 @@ export default function App() {
                 <span>Voice:</span>
                 <strong className="text-white font-mono">{voice}</strong>
               </span>
-              {(customStartingTopic.trim() && callStatus === 'idle') ? (
-                <div className="flex items-center gap-1 max-w-[240px] sm:max-w-[380px]">
-                  <span className="flex items-center gap-1.5 bg-gradient-to-r from-teal-950/90 to-slate-900/90 border border-teal-500/60 text-teal-200 px-2.5 py-1 rounded-md text-[11px] sm:text-xs shadow-sm truncate">
-                    <BookOpen className="h-3.5 w-3.5 text-teal-400 shrink-0" />
-                    <span className="font-bold truncate text-teal-100" title={customStartingTopic.trim()}>
-                      {customStartingTopic.trim()}
-                    </span>
-                  </span>
-                </div>
-              ) : activeContext.currentTopic ? (
+              {/* Active Topic Indicator - ONLY shown during active live call */}
+              {callStatus !== 'idle' && activeContext.currentTopic && (
                 <div className="flex items-center gap-1 max-w-[240px] sm:max-w-[380px]">
                   <span className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-950/90 to-slate-900/90 border border-emerald-500/50 text-emerald-200 px-2.5 py-1 rounded-md text-[11px] sm:text-xs shadow-sm truncate">
                     <BookOpen className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
@@ -1161,11 +1164,6 @@ export default function App() {
                     <span>পরের টপিক</span>
                   </button>
                 </div>
-              ) : (
-                <span className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-800 text-slate-400 px-2.5 py-1 rounded-md text-[11px] sm:text-xs">
-                  <BookOpen className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                  <span className="truncate">টপিক নির্বাচন করুন</span>
-                </span>
               )}
               <button
                 type="button"
