@@ -387,5 +387,24 @@ test('Scenario V: Numbered chapter resolution for Class 10 Science Chapter 3 and
   assert.ok(intent2.extractedTopic?.includes('অক্ষরেখা ও দ্রাঘিমারেখা'));
 });
 
+test('Scenario W: Custom topic provided before call start initializes context and durable instruction', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  
+  // Custom topic entered in starting box
+  const customTopic = 'জৈব রসায়ন';
+  sm.setTeachingMode('lecture', 'Class 10', 'বিজ্ঞান');
+  sm.processStudentInput(customTopic);
+  
+  if (!sm.getContext().currentTopic) {
+    sm.setTopic(customTopic);
+  }
+
+  assert.equal(sm.getContext().currentTopic, 'জৈব রসায়ন (Organic Chemistry)');
+  const instruction = sm.generateDurableContextInstruction();
+  assert.match(instruction, /Active Topic to teach: জৈব রসায়ন/);
+});
+
+
 
 

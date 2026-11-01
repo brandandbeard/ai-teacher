@@ -101,6 +101,7 @@ export default function App() {
   const [typedMessage, setTypedMessage] = useState('');
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [customStartingTopic, setCustomStartingTopic] = useState('');
 
   // Audio References
   const audioPlayerRef = useRef<LiveAudioPlayer | null>(null);
@@ -274,19 +275,38 @@ export default function App() {
       lastResumptionHandleRef.current = null;
       conversationStateMachine.setResumptionHandle(null);
 
-      // Random chapter selection on every fresh live call connect
-      if (activeSection === 'wbbse') {
-        const cls = selectedClass || 'Class 10';
-        const subj = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
-        const freshTopic = conversationStateMachine.pickRandomTopic(subj, cls);
+      const customTopicTrimmed = customStartingTopic.trim();
+
+      if (customTopicTrimmed) {
+        // User typed a specific custom topic or chapter!
+        const cls = activeSection === 'wbbse' ? (selectedClass || 'Class 10') : undefined;
+        const subj = activeSection === 'wbbse'
+          ? (selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল')
+          : selectedCompetitiveSubject;
+
         conversationStateMachine.setTeachingMode(teachingMode, cls, subj);
-        conversationStateMachine.setTopic(freshTopic);
-        setActiveContext(conversationStateMachine.getContext());
+        conversationStateMachine.processStudentInput(customTopicTrimmed);
+
+        // Fallback: if state machine regex didn't extract a preset topic name, force the custom topic directly
+        if (!conversationStateMachine.getContext().currentTopic) {
+          conversationStateMachine.setTopic(customTopicTrimmed);
+        }
+        setActiveContext({ ...conversationStateMachine.getContext() });
       } else {
-        const freshTopic = conversationStateMachine.pickRandomTopic(selectedCompetitiveSubject);
-        conversationStateMachine.setTeachingMode(teachingMode, undefined, selectedCompetitiveSubject);
-        conversationStateMachine.setTopic(freshTopic);
-        setActiveContext(conversationStateMachine.getContext());
+        // Random chapter selection on every fresh live call connect (default behavior)
+        if (activeSection === 'wbbse') {
+          const cls = selectedClass || 'Class 10';
+          const subj = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
+          const freshTopic = conversationStateMachine.pickRandomTopic(subj, cls);
+          conversationStateMachine.setTeachingMode(teachingMode, cls, subj);
+          conversationStateMachine.setTopic(freshTopic);
+          setActiveContext(conversationStateMachine.getContext());
+        } else {
+          const freshTopic = conversationStateMachine.pickRandomTopic(selectedCompetitiveSubject);
+          conversationStateMachine.setTeachingMode(teachingMode, undefined, selectedCompetitiveSubject);
+          conversationStateMachine.setTopic(freshTopic);
+          setActiveContext(conversationStateMachine.getContext());
+        }
       }
     }
 
@@ -416,6 +436,19 @@ export default function App() {
               }
               if (!isAutoRenew) {
                 addTranscript('system', `Connected to ${model} with voice '${voice}'`);
+
+                // Send kickoff trigger so Gemini Live immediately begins addressing the active topic!
+                const currentCtx = conversationStateMachine.getContext();
+                const topicToTeach = currentCtx.currentTopic || customStartingTopic.trim();
+                if (topicToTeach && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  const kickoffText = teachingMode === 'quiz'
+                    ? `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ের প্রথম গুরুত্বপূর্ণ প্রশ্নটি করুন।`
+                    : teachingMode === 'doubts'
+                    ? `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ে আমার কী কী সাধারণ সংশয় হতে পারে সংক্ষেপে বলুন।`
+                    : `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ের মূল ধারণা দিয়ে বিস্তারিত বাংলায় আলোচনা শুরু করুন।`;
+                  
+                  wsRef.current.send(JSON.stringify({ type: 'text', text: kickoffText }));
+                }
               }
 
               // Connect microphone (keeps active stream uninterrupted!)
@@ -1101,7 +1134,16 @@ export default function App() {
                 <span>Voice:</span>
                 <strong className="text-white font-mono">{voice}</strong>
               </span>
-              {activeContext.currentTopic ? (
+              {(customStartingTopic.trim() && callStatus === 'idle') ? (
+                <div className="flex items-center gap-1 max-w-[240px] sm:max-w-[380px]">
+                  <span className="flex items-center gap-1.5 bg-gradient-to-r from-teal-950/90 to-slate-900/90 border border-teal-500/60 text-teal-200 px-2.5 py-1 rounded-md text-[11px] sm:text-xs shadow-sm truncate">
+                    <BookOpen className="h-3.5 w-3.5 text-teal-400 shrink-0" />
+                    <span className="font-bold truncate text-teal-100" title={customStartingTopic.trim()}>
+                      {customStartingTopic.trim()}
+                    </span>
+                  </span>
+                </div>
+              ) : activeContext.currentTopic ? (
                 <div className="flex items-center gap-1 max-w-[240px] sm:max-w-[380px]">
                   <span className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-950/90 to-slate-900/90 border border-emerald-500/50 text-emerald-200 px-2.5 py-1 rounded-md text-[11px] sm:text-xs shadow-sm truncate">
                     <BookOpen className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
@@ -1445,8 +1487,60 @@ export default function App() {
                     </button>
                   </div>
 
+                  {/* Custom Topic / Chapter Input Box before Starting Call */}
+                  <div className="mt-3.5 pt-3 border-t border-indigo-500/20">
+                    <div className="flex items-center justify-between mb-1.5 px-0.5">
+                      <label htmlFor="custom-topic-input" className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                        <span className="text-amber-400">🎯</span>
+                        <span>শুরু করার নির্দিষ্ট টপিক বা অধ্যায় (ঐচ্ছিক):</span>
+                      </label>
+                      {customStartingTopic.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setCustomStartingTopic('')}
+                          className="text-[11px] text-slate-400 hover:text-rose-400 flex items-center gap-0.5 transition-colors"
+                        >
+                          মুছে ফেলুন ✕
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        id="custom-topic-input"
+                        type="text"
+                        value={customStartingTopic}
+                        onChange={(e) => setCustomStartingTopic(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            startCall(false);
+                          }
+                        }}
+                        placeholder="যেমন: জৈব রসায়ন, ফরাসি বিপ্লব, আলো অধ্যায় ৩, বা আপনার পছন্দের বিষয়..."
+                        className="w-full bg-slate-900/90 border border-slate-700/90 hover:border-cyan-500/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 transition-all outline-none pr-28 sm:pr-32"
+                      />
+                      {customStartingTopic.trim() ? (
+                        <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                          <span className="text-[10px] bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-md font-mono">
+                            কাস্টম টপিক সক্রিয়
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="absolute right-2.5 top-1/2 -translate-y-1/2 hidden sm:flex items-center">
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            ফাঁকা রাখলে অটো
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1.5 px-0.5 leading-relaxed">
+                      💡 কোনো নির্দিষ্ট অধ্যায় বা টপিক থেকে শুরু করতে চাইলে এখানে লিখে <strong>Start</strong> করুন। ফাঁকা রাখলে স্বয়ংক্রিয়ভাবে পাঠ্যবইয়ের চমৎকার কোনো সিলেবাস বিষয় দিয়ে ক্লাস শুরু হবে।
+                    </p>
+                  </div>
+
                   {/* Immediate Start Class Call button inside the Unified Mode Section */}
-                  <div className="mt-3.5 pt-3 border-t border-indigo-500/20 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+                  <div className="mt-3 pt-3 border-t border-indigo-500/20 flex flex-col sm:flex-row items-center justify-between gap-2.5">
                     <div className="text-[11px] text-slate-300 flex items-center gap-1.5 max-w-full truncate">
                       <span className="text-slate-400 shrink-0">নির্বাচিত:</span>
                       <strong className="text-emerald-300 font-semibold truncate">
