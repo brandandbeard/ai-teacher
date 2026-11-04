@@ -47,8 +47,11 @@ import {
   WBBSE_HISTORY_PROMPT,
   WBBSE_SCIENCE_PROMPT,
   WBBSE_GEOGRAPHY_PROMPT,
+  GOOGLE_NOTEBOOKLM_PROMPT,
 } from './data/teacherPersonas.ts';
 import { sanitizeBilingualText } from './utils/bilingualFilter.ts';
+import { NotebookSourcesModal } from './components/NotebookSourcesModal.tsx';
+import type { NotebookSource } from './types/notebook.ts';
 
 type CallStatus = 'idle' | 'connecting' | 'active' | 'speaking' | 'listening' | 'interrupted';
 
@@ -68,7 +71,7 @@ export default function App() {
   const [selectedClass, setSelectedClass] = useState<string>('Class 10');
   const [selectedWbbseSubject, setSelectedWbbseSubject] = useState<'science' | 'history' | 'geography'>('science');
   const [selectedCompetitiveSubject, setSelectedCompetitiveSubject] = useState<string>('Spoken English');
-  const [activeSection, setActiveSection] = useState<'wbbse' | 'competitive'>('wbbse');
+  const [activeSection, setActiveSection] = useState<'wbbse' | 'competitive' | 'notebook'>('wbbse');
   const [teachingMode, setTeachingModeState] = useState<TeachingMode>('lecture');
 
   useEffect(() => {
@@ -104,6 +107,25 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [customStartingTopic, setCustomStartingTopic] = useState('');
 
+  // Google NotebookLM Sources State
+  const [isNotebookModalOpen, setIsNotebookModalOpen] = useState(false);
+  const [notebookSources, setNotebookSources] = useState<NotebookSource[]>(() => {
+    try {
+      const saved = localStorage.getItem('mega_quiz_notebook_sources');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  // Sync notebook sources with state machine and local storage
+  useEffect(() => {
+    conversationStateMachine.setNotebookSources(notebookSources);
+    try {
+      localStorage.setItem('mega_quiz_notebook_sources', JSON.stringify(notebookSources));
+    } catch (e) {}
+  }, [notebookSources]);
+
   // Audio References
   const audioPlayerRef = useRef<LiveAudioPlayer | null>(null);
   const audioRecorderRef = useRef<LiveAudioRecorder | null>(null);
@@ -116,6 +138,7 @@ export default function App() {
   const callStatusRef = useRef<CallStatus>(callStatus);
   const lastResumptionHandleRef = useRef<string | null>(null);
   const inactivityTimeoutRef = useRef<number | null>(null);
+  const hasKickoffSentRef = useRef<boolean>(false);
 
   useEffect(() => {
     callStatusRef.current = callStatus;
@@ -264,28 +287,55 @@ export default function App() {
     startCall(true);
   }, []);
 
+  interface StartCallOverrides {
+    section?: 'wbbse' | 'competitive' | 'notebook';
+    mode?: TeachingMode;
+    personaPrompt?: string;
+    voice?: string;
+    topic?: string;
+    notebookSources?: NotebookSource[];
+  }
+
   // Start Call Handler
-  const startCall = async (isAutoRenew = false) => {
+  const startCall = async (isAutoRenew = false, overrides?: StartCallOverrides) => {
     if (isAutoRenew && !conversationStateMachine.acquireReconnectLock()) {
       console.log('[App] Reconnect already in progress, avoiding duplicate connect');
       return;
     }
 
+    const targetSection = overrides?.section ?? activeSection;
+    const targetMode = overrides?.mode ?? teachingMode;
+    const targetPrompt = overrides?.personaPrompt ?? (targetSection === 'notebook' ? GOOGLE_NOTEBOOKLM_PROMPT : systemInstruction);
+    const targetVoice = overrides?.voice ?? (targetSection === 'notebook' ? 'Kore' : voice);
+    const targetSources = overrides?.notebookSources ?? notebookSources;
+
     // CRITICAL: When user initiates a fresh call, discard old session resume token so the selected subject/persona starts clean!
     if (!isAutoRenew) {
+      hasKickoffSentRef.current = false;
       lastResumptionHandleRef.current = null;
       conversationStateMachine.setResumptionHandle(null);
 
-      const customTopicTrimmed = customStartingTopic.trim();
+      const customTopicTrimmed = (overrides?.topic ?? customStartingTopic).trim();
 
-      if (customTopicTrimmed) {
+      if (targetSection === 'notebook') {
+        conversationStateMachine.setNotebookSources(targetSources);
+        conversationStateMachine.updatePersona(GOOGLE_NOTEBOOKLM_PROMPT);
+        const active = targetSources.filter((s) => s.isActive);
+        const notebookTopic = overrides?.topic
+          ? overrides.topic
+          : (customTopicTrimmed ? customTopicTrimmed : (active.length > 0 ? `নোটবুক: ${active[0].title}` : 'গুগল নোটবুক সোর্সেস'));
+
+        conversationStateMachine.setTeachingMode(targetMode, undefined, 'Google NotebookLM');
+        conversationStateMachine.setTopic(notebookTopic);
+        setActiveContext({ ...conversationStateMachine.getContext() });
+      } else if (customTopicTrimmed) {
         // User typed a specific custom topic or chapter!
-        const cls = activeSection === 'wbbse' ? (selectedClass || 'Class 10') : undefined;
-        const subj = activeSection === 'wbbse'
+        const cls = targetSection === 'wbbse' ? (selectedClass || 'Class 10') : undefined;
+        const subj = targetSection === 'wbbse'
           ? (selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল')
           : selectedCompetitiveSubject;
 
-        conversationStateMachine.setTeachingMode(teachingMode, cls, subj);
+        conversationStateMachine.setTeachingMode(targetMode, cls, subj);
         conversationStateMachine.processStudentInput(customTopicTrimmed);
 
         // Fallback: if state machine regex didn't extract a preset topic name, force the custom topic directly
@@ -295,16 +345,16 @@ export default function App() {
         setActiveContext({ ...conversationStateMachine.getContext() });
       } else {
         // Random chapter selection on every fresh live call connect (default behavior)
-        if (activeSection === 'wbbse') {
+        if (targetSection === 'wbbse') {
           const cls = selectedClass || 'Class 10';
           const subj = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
           const freshTopic = conversationStateMachine.pickRandomTopic(subj, cls);
-          conversationStateMachine.setTeachingMode(teachingMode, cls, subj);
+          conversationStateMachine.setTeachingMode(targetMode, cls, subj);
           conversationStateMachine.setTopic(freshTopic);
           setActiveContext(conversationStateMachine.getContext());
         } else {
           const freshTopic = conversationStateMachine.pickRandomTopic(selectedCompetitiveSubject);
-          conversationStateMachine.setTeachingMode(teachingMode, undefined, selectedCompetitiveSubject);
+          conversationStateMachine.setTeachingMode(targetMode, undefined, selectedCompetitiveSubject);
           conversationStateMachine.setTopic(freshTopic);
           setActiveContext(conversationStateMachine.getContext());
         }
@@ -369,9 +419,10 @@ export default function App() {
           ? `\nSpeaking Pace: Please speak at an overall ${speechSpeed > 1.0 ? 'slightly brisk' : 'relaxed/slower'} speaking pace (${speechSpeed}x speed).`
           : '';
         const durableInstruction = conversationStateMachine.generateDurableContextInstruction();
-        const baseRule = systemInstruction.includes('NON-STOP CONTINUOUS TEACHING')
-          ? systemInstruction
-          : `${systemInstruction}\n\n${NON_STOP_TEACHING_SYSTEM_RULE}`;
+        const effectiveBasePrompt = targetPrompt;
+        const baseRule = effectiveBasePrompt.includes('NON-STOP CONTINUOUS TEACHING')
+          ? effectiveBasePrompt
+          : `${effectiveBasePrompt}\n\n${NON_STOP_TEACHING_SYSTEM_RULE}`;
         const effectiveInstruction = `${baseRule}${speedInstruction}${durableInstruction ? `\n\n${durableInstruction}` : ''}`;
 
         // Dispatch session start config: resume token is ONLY sent during seamless auto-renewal!
@@ -383,12 +434,28 @@ export default function App() {
           JSON.stringify({
             type: 'start',
             model,
-            voice,
+            voice: targetVoice,
             systemInstruction: effectiveInstruction,
             resumeHandle: effectiveResumeToken,
             contextSummary: conversationStateMachine.getContext(),
           })
         );
+
+        if (targetSection === 'notebook') {
+          const ctx = conversationStateMachine.getContext();
+          const activeTopic = ctx.currentTopic || 'গুগল নোটবুক সোর্সেস';
+          const kickOffPrompt = targetMode === 'lecture'
+            ? `[নোটবুক আলোচনা শুরু]: আমরা আমাদের যুক্ত করা নোটবুক উপাদান "${activeTopic}" নিয়ে বিস্তারিত আলোচনা করব। এই সোর্সের মূল বিষয়বস্তু, তত্ত্ব ও পয়েন্ট ধরে একটানা অনর্গল বাংলায় বুঝিয়ে যান। সোর্সের বাইরে যাবেন না। শুরু করুন!`
+            : targetMode === 'doubts'
+            ? `[নোটবুক ডাউট সলভ শুরু]: আমাদের যুক্ত করা নোটবুক উপাদান "${activeTopic}" প্রস্তুত। ছাত্রকে স্বাগতম জানিয়ে বলুন সোর্স থেকে যেকোনো প্রশ্ন জিজ্ঞাসা করতে।`
+            : `[নোটবুক মৌখিক কুইজ শুরু]: আমাদের যুক্ত করা নোটবুক উপাদান "${activeTopic}" থেকে আমাকে একের পর এক গুরুত্বপূর্ণ প্রশ্ন ও ভাইভা কুইজ জিজ্ঞাসা করুন। প্রথম প্রশ্নটি করুন!`;
+
+          setTimeout(() => {
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({ type: 'text', text: kickOffPrompt }));
+            }
+          }, 400);
+        }
       };
 
       ws.onmessage = (event) => {
@@ -416,7 +483,6 @@ export default function App() {
               conversationStateMachine.setResumptionHandle(msg.handle);
             }
             setStatusMessage('Session cycle completed. Resuming conversation...');
-            renewSession();
             return;
           }
 
@@ -435,7 +501,8 @@ export default function App() {
                 lastResumptionHandleRef.current = msg.resumptionHandle;
                 conversationStateMachine.setResumptionHandle(msg.resumptionHandle);
               }
-              if (!isAutoRenew) {
+              if (!isAutoRenew && !hasKickoffSentRef.current && !msg.resumed) {
+                hasKickoffSentRef.current = true;
                 addTranscript('system', `Connected to ${model} with voice '${voice}'`);
 
                 // Send kickoff trigger so Gemini Live immediately begins addressing the active topic!
@@ -610,15 +677,7 @@ export default function App() {
         },
         () => {
           clearInactivityTimer();
-          // Exactly after 1.25s silence has elapsed: notify server turn is complete!
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(
-              JSON.stringify({
-                type: 'turn_complete',
-              })
-            );
-          }
-          setStatusMessage('Processing your answer...');
+          setStatusMessage('উত্তর শোনা হয়েছে (AI উত্তর প্রস্তুত করছে)...');
         }
       );
     } catch (micErr: any) {
@@ -860,6 +919,100 @@ export default function App() {
     { id: 'static-gk', title: 'Static GK', prompt: ADHIKARI_SIR_PROMPT, voice: 'Charon', icon: '🏛️' },
   ];
 
+  // NotebookLM Source Handlers
+  const handleAddNotebookSource = (source: NotebookSource) => {
+    setNotebookSources((prev) => {
+      const exists = prev.findIndex((s) => s.id === source.id);
+      if (exists !== -1) {
+        const updated = [...prev];
+        updated[exists] = source;
+        return updated;
+      }
+      return [source, ...prev];
+    });
+
+    if (callStatus !== 'idle' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const sourceNotice = `[নোটবুক সোর্স যুক্ত করা হয়েছে]: নতুন উপাদান "${source.title}" (${source.type.toUpperCase()}) যুক্ত হয়েছে। সারসংক্ষেপ: ${source.summary}। এবার থেকে এই উপাদানকে গুরুত্ব দিয়ে পাঠদান ও প্রশ্নোত্তর পরিচালনা করুন।`;
+      addTranscript('user', `[সোর্স যুক্ত: ${source.title}]`);
+      wsRef.current.send(JSON.stringify({ type: 'text', text: sourceNotice }));
+      setStatusMessage(`সোর্স যুক্ত: ${source.title}`);
+    }
+  };
+
+  const handleRemoveNotebookSource = (id: string) => {
+    setNotebookSources((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const handleToggleNotebookSource = (id: string) => {
+    setNotebookSources((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, isActive: !s.isActive } : s))
+    );
+  };
+
+  const handleSelectNotebookSection = (mode?: TeachingMode) => {
+    setActiveSection('notebook');
+    const chosenMode = mode || teachingMode;
+    setTeachingModeState(chosenMode);
+    setVoice('Kore');
+    setSystemInstruction(GOOGLE_NOTEBOOKLM_PROMPT);
+    conversationStateMachine.updatePersona(GOOGLE_NOTEBOOKLM_PROMPT);
+
+    const active = notebookSources.filter((s) => s.isActive);
+    const topicName = active.length > 0 ? `নোটবুক: ${active[0].title}` : 'গুগল নোটবুক সোর্সেস';
+
+    // Clear old session resume handle so previous subject never bleeds in
+    lastResumptionHandleRef.current = null;
+    conversationStateMachine.setResumptionHandle(null);
+    conversationStateMachine.setTeachingMode(chosenMode, undefined, 'Google NotebookLM');
+    if (callStatus !== 'idle') {
+      conversationStateMachine.setTopic(topicName);
+    }
+    setActiveContext(conversationStateMachine.getContext());
+  };
+
+  const handleStartNotebookSession = (mode: TeachingMode, sourceTitle?: string) => {
+    setActiveSection('notebook');
+    setTeachingModeState(mode);
+    setVoice('Kore');
+    setSystemInstruction(GOOGLE_NOTEBOOKLM_PROMPT);
+    conversationStateMachine.updatePersona(GOOGLE_NOTEBOOKLM_PROMPT);
+
+    const active = notebookSources.filter((s) => s.isActive);
+    const topicName = sourceTitle ? `নোটবুক: ${sourceTitle}` : active.length > 0 ? `নোটবুক: ${active[0].title}` : 'গুগল নোটবুক সোর্সেস';
+
+    conversationStateMachine.setTeachingMode(mode, undefined, 'Google NotebookLM');
+    conversationStateMachine.setTopic(topicName);
+    setActiveContext({ ...conversationStateMachine.getContext() });
+
+    // Clear old session resume handle so previous subject never bleeds in
+    lastResumptionHandleRef.current = null;
+    conversationStateMachine.setResumptionHandle(null);
+
+    // If a call was already in progress under another subject, stop it first to reset live session completely
+    if (callStatus !== 'idle') {
+      stopCall();
+      setTimeout(() => {
+        startCall(false, {
+          section: 'notebook',
+          mode,
+          personaPrompt: GOOGLE_NOTEBOOKLM_PROMPT,
+          voice: 'Kore',
+          topic: topicName,
+          notebookSources,
+        });
+      }, 150);
+    } else {
+      startCall(false, {
+        section: 'notebook',
+        mode,
+        personaPrompt: GOOGLE_NOTEBOOKLM_PROMPT,
+        voice: 'Kore',
+        topic: topicName,
+        notebookSources,
+      });
+    }
+  };
+
   const handleSelectClass = (cls: string) => {
     setSelectedClass(cls);
     setActiveSection('wbbse');
@@ -928,6 +1081,11 @@ export default function App() {
       subjectName = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
       prompt = selectedWbbseSubject === 'science' ? WBBSE_SCIENCE_PROMPT : selectedWbbseSubject === 'history' ? WBBSE_HISTORY_PROMPT : WBBSE_GEOGRAPHY_PROMPT;
       defaultVoice = selectedWbbseSubject === 'science' ? 'Kore' : 'Charon';
+    } else if (activeSection === 'notebook') {
+      cls = undefined;
+      subjectName = 'Google NotebookLM';
+      prompt = GOOGLE_NOTEBOOKLM_PROMPT;
+      defaultVoice = 'Kore';
     } else {
       cls = undefined;
       subjectName = selectedCompetitiveSubject;
@@ -946,11 +1104,23 @@ export default function App() {
     // Point 2: If call is idle, do NOT auto-start call. User starts via Start button.
     // If call is already active, dynamically switch mode live:
     if (callStatus !== 'idle' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const modeText = mode === 'lecture'
-        ? `[মোড পরিবর্তন: আলোচনা]: এখন থেকে আমরা "আলোচনা" মোডে পড়াশোনা করব। কোনো অপ্রয়োজনীয় ভূমিকা ছাড়া ${cls ? `${cls} ` : ''}${subjectName}-এর বিষয়বস্তু একটানা অনর্গল বিস্তারিতভাবে বাংলায় বুঝিয়ে যান।`
-        : mode === 'doubts'
-        ? `[মোড পরিবর্তন: AI কে প্রশ্ন]: এখন থেকে আমরা "AI কে প্রশ্ন" মোডে পড়াশোনা করব। আমার যেকোনো প্রশ্ন বা ডাউট শুনুন এবং বাংলায় সহজ করে বুঝিয়ে উত্তর দিন।`
-        : `[মোড পরিবর্তন: প্রশ্ন উত্তর]: এখন থেকে আমরা "প্রশ্ন উত্তর" মোডে পড়াশোনা করব। আপনি আমাকে ${cls ? `${cls} ` : ''}${subjectName}-এর উপর একটি একটি করে প্রশ্ন/MCQ জিজ্ঞাসা করুন এবং আমি উত্তর দেব।`;
+      audioPlayerRef.current?.stopAndClear();
+      let modeText = '';
+      if (activeSection === 'notebook') {
+        const active = notebookSources.filter((s) => s.isActive);
+        const currentSrcName = active.length > 0 ? active[0].title : 'যুক্ত করা নোটবুক উপাদান';
+        modeText = mode === 'lecture'
+          ? `[মোড পরিবর্তন: নোটবুক আলোচনা]: এখন থেকে আমরা "আলোচনা" মোডে পড়াশোনা করব। আমাদের যুক্ত করা নোটবুক উপাদান "${currentSrcName}"-এর বিষয়বস্তু একটানা অনর্গল বিস্তারিতভাবে বাংলায় বুঝিয়ে যান। কোনো বাইরের সিলেবাসে যাবেন না।`
+          : mode === 'doubts'
+          ? `[মোড পরিবর্তন: নোটবুক AI কে প্রশ্ন]: এখন থেকে "AI কে প্রশ্ন" মোড। আমাদের যুক্ত করা নোটবুক উপাদান "${currentSrcName}" নিয়ে আমার যেকোনো প্রশ্ন শুনুন ও পুঙ্খানুপুঙ্খ বুঝিয়ে বলুন।`
+          : `[মোড পরিবর্তন: নোটবুক প্রশ্ন উত্তর]: এখন থেকে "প্রশ্ন উত্তর" মোড। আমাদের যুক্ত করা নোটবুক উপাদান "${currentSrcName}" থেকে আমাকে একটি একটি করে গুরুত্বপূর্ণ ভাইভা প্রশ্ন/কুইজ জিজ্ঞাসা করুন।`;
+      } else {
+        modeText = mode === 'lecture'
+          ? `[মোড পরিবর্তন: আলোচনা]: এখন থেকে আমরা "আলোচনা" মোডে পড়াশোনা করব। কোনো অপ্রয়োজনীয় ভূমিকা ছাড়া ${cls ? `${cls} ` : ''}${subjectName}-এর বিষয়বস্তু একটানা অনর্গল বিস্তারিতভাবে বাংলায় বুঝিয়ে যান।`
+          : mode === 'doubts'
+          ? `[মোড পরিবর্তন: AI কে প্রশ্ন]: এখন থেকে আমরা "AI কে প্রশ্ন" মোডে পড়াশোনা করব। আমার যেকোনো প্রশ্ন বা ডাউট শুনুন এবং বাংলায় সহজ করে বুঝিয়ে উত্তর দিন।`
+          : `[মোড পরিবর্তন: প্রশ্ন উত্তর]: এখন থেকে আমরা "প্রশ্ন উত্তর" মোডে পড়াশোনা করব। আপনি আমাকে ${cls ? `${cls} ` : ''}${subjectName}-এর উপর একটি একটি করে প্রশ্ন/MCQ জিজ্ঞাসা করুন এবং আমি উত্তর দেব।`;
+      }
 
       addTranscript('user', `[মোড পরিবর্তন: ${modeLabel}]`);
       wsRef.current.send(JSON.stringify({ type: 'text', text: modeText }));
@@ -974,7 +1144,7 @@ export default function App() {
     }
 
     if (teachingMode === 'quiz') {
-      sendQuickActionMessage('পরের প্রশ্নটি জিজ্ঞাসা করো');
+      sendQuickActionMessage('পরের প্রশ্নটি জিজ্ঞাসা করো। পূর্বের প্রশ্নগুলো পুনরাবৃত্তি না করে এই অধ্যায়ের সম্পূর্ণ নতুন একটি প্রশ্ন করো।');
     } else if (teachingMode === 'doubts') {
       sendQuickActionMessage('পরবর্তী বিষয়ে চলে যাও বা পরের ধারণাটি বুঝিয়ে বলো');
     } else {
@@ -985,6 +1155,7 @@ export default function App() {
   // 2. Next Topic (switches to a fresh new chapter/topic in the syllabus)
   const handleNextTopicClick = () => {
     let nextTopic: string;
+    conversationStateMachine.clearTopic();
     if (activeSection === 'wbbse') {
       const cls = selectedClass || 'Class 10';
       const subj = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
@@ -992,6 +1163,21 @@ export default function App() {
       conversationStateMachine.setTopic(nextTopic);
       setActiveContext(conversationStateMachine.getContext());
       sendQuickActionMessage(`[পরের অধ্যায়]: এবার আমরা নতুন অধ্যায় "${nextTopic}" শুরু করব। এই অধ্যায়ের মূল বিষয়বস্তু আলোচনা করো।`);
+    } else if (activeSection === 'notebook') {
+      const active = notebookSources.filter((s) => s.isActive);
+      if (active.length > 1) {
+        const cur = activeContext.currentTopic?.replace('নোটবুক: ', '');
+        const currentIndex = active.findIndex((s) => s.title === cur);
+        const nextSrc = active[(currentIndex + 1) % active.length];
+        nextTopic = `নোটবুক: ${nextSrc.title}`;
+      } else if (active.length === 1) {
+        nextTopic = `নোটবুক: ${active[0].title}`;
+      } else {
+        nextTopic = 'গুগল নোটবুক সোর্সেস';
+      }
+      conversationStateMachine.setTopic(nextTopic);
+      setActiveContext(conversationStateMachine.getContext());
+      sendQuickActionMessage(`[পরের সোর্স]: এবার আমরা পরবর্তী নোটবুক সোর্স "${nextTopic}" নিয়ে আলোচনা করব। এই সোর্সের মূল তথ্য বিশদে আলোচনা করো।`);
     } else {
       nextTopic = conversationStateMachine.pickRandomTopic(selectedCompetitiveSubject);
       conversationStateMachine.setTopic(nextTopic);
@@ -1091,6 +1277,20 @@ export default function App() {
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
             <span className="font-medium">Backend Connected</span>
           </div>
+
+          {/* Google NotebookLM Sources Button */}
+          <button
+            type="button"
+            onClick={() => setIsNotebookModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-indigo-500/50 bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-200 hover:text-white transition-all text-xs font-semibold shadow-sm"
+            title="Google NotebookLM Sources (YouTube, PDF, Drive, Image, Notes)"
+          >
+            <BookOpen className="h-3.5 w-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">নোটবুক সোর্সেস</span>
+            <span className="text-[10px] bg-indigo-600 text-white font-mono px-1.5 py-0.2 rounded-full font-bold">
+              {notebookSources.filter((s) => s.isActive).length}
+            </span>
+          </button>
 
           {/* Mobile Transcript Toggle Button */}
           <button
@@ -1437,14 +1637,139 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3. Unified Mode Section (One single selector for all subjects) */}
+                {/* 3. Google NotebookLM Dedicated Knowledge Base Section */}
+                <div
+                  className={`rounded-2xl border transition-all p-3 sm:p-4 shadow-lg ${
+                    activeSection === 'notebook'
+                      ? 'border-cyan-400 bg-gradient-to-r from-indigo-950/70 via-slate-900/90 to-cyan-950/70 shadow-cyan-500/20 ring-1 ring-cyan-400/40'
+                      : 'border-slate-800 bg-slate-900/50 hover:border-indigo-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2.5 px-1">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectNotebookSection()}
+                      className="text-xs sm:text-sm font-bold text-cyan-300 hover:text-white flex items-center gap-1.5 transition-colors text-left"
+                    >
+                      <BookOpen className="h-4 w-4 text-indigo-400" />
+                      <span>গুগল নোটবুক (Google NotebookLM সোর্সেস)</span>
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-cyan-300 bg-cyan-950/90 border border-cyan-500/40 px-2 py-0.5 rounded-full font-medium shadow-sm font-mono">
+                        {notebookSources.filter((s) => s.isActive).length}টি সক্রিয়
+                      </span>
+                      {activeSection === 'notebook' && (
+                        <span className="text-[10px] text-emerald-300 bg-emerald-950/90 border border-emerald-500/40 px-2 py-0.5 rounded-full font-medium shadow-sm">
+                          সক্রিয় স্টাডি মোড
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-300 mb-2.5 px-1 leading-relaxed">
+                    আপনার যুক্ত করা YouTube ভিডিও, PDF বই, Google Drive বা ছবির নোটস থেকে সম্পূর্ণ আলাদাভাবে আলোচনা ও ভাইভা কুইজ হবে।
+                  </p>
+
+                  {/* Active Sources Badges */}
+                  <div className="flex flex-wrap items-center gap-1.5 mb-3 px-1">
+                    {notebookSources.length === 0 ? (
+                      <span className="text-[11px] text-slate-400 italic">
+                        এখনো কোনো সোর্স যুক্ত করা হয়নি। নিচে "সোর্স যোগ / ম্যানেজ" বাটনে ক্লিক করে লিঙ্ক বা ফাইল দিন।
+                      </span>
+                    ) : (
+                      notebookSources.map((src) => (
+                        <button
+                          key={src.id}
+                          type="button"
+                          onClick={() => handleStartNotebookSession(teachingMode, src.title)}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-1.5 border transition-all ${
+                            src.isActive
+                              ? 'bg-indigo-950/80 border-indigo-400/50 text-indigo-200 hover:bg-indigo-900/80'
+                              : 'bg-slate-900 border-slate-800 text-slate-500 line-through opacity-60'
+                          }`}
+                          title={src.isActive ? 'ক্লিক করে এই সোর্স থেকে ক্লাস শুরু করুন' : 'নিষ্ক্রিয় সোর্স'}
+                        >
+                          <span>{src.type === 'youtube' ? '🔴' : src.type === 'pdf' ? '📄' : src.type === 'drive' ? '📁' : src.type === 'image' ? '🖼️' : '📝'}</span>
+                          <span className="max-w-[140px] sm:max-w-[200px] truncate">{src.title}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Quick Mode & Manage Actions for NotebookLM */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-indigo-500/20">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleStartNotebookSession('lecture')}
+                        className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 border transition-all shadow-sm active:scale-95 ${
+                          activeSection === 'notebook' && teachingMode === 'lecture'
+                            ? 'bg-emerald-600 border-emerald-400 text-white shadow-emerald-600/30 ring-1 ring-emerald-400'
+                            : 'bg-slate-900/80 border-slate-700/80 hover:border-emerald-500/40 text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        <span>🎙️</span>
+                        <span>সোর্স আলোচনা</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleStartNotebookSession('doubts')}
+                        className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 border transition-all shadow-sm active:scale-95 ${
+                          activeSection === 'notebook' && teachingMode === 'doubts'
+                            ? 'bg-cyan-600 border-cyan-400 text-white shadow-cyan-600/30 ring-1 ring-cyan-400'
+                            : 'bg-slate-900/80 border-slate-700/80 hover:border-cyan-500/40 text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        <span>🙋‍♂️</span>
+                        <span>সোর্স AI কে প্রশ্ন</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleStartNotebookSession('quiz')}
+                        className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 border transition-all shadow-sm active:scale-95 ${
+                          activeSection === 'notebook' && teachingMode === 'quiz'
+                            ? 'bg-purple-600 border-purple-400 text-white shadow-purple-600/30 ring-1 ring-purple-400'
+                            : 'bg-slate-900/80 border-slate-700/80 hover:border-purple-500/40 text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        <span>📝</span>
+                        <span>সোর্স মৌখিক কুইজ</span>
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsNotebookModalOpen(true)}
+                      className="py-1.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-indigo-600/30 shrink-0"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                      <span>সোর্স যোগ / ম্যানেজ</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. Unified Mode Section (One single selector for all subjects) */}
                 <div className="rounded-2xl border border-indigo-500/40 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 p-3 sm:p-4 shadow-lg shadow-indigo-950/20">
                   <div className="flex items-center justify-between mb-2 px-1">
                     <span className="text-xs sm:text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                      পড়ার মোড ({activeSection === 'wbbse' ? `${selectedClass} - ${selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল'}` : selectedCompetitiveSubject}):
+                      পড়ার মোড ({
+                        activeSection === 'notebook'
+                          ? `গুগল নোটবুক (${notebookSources.filter((s) => s.isActive).length > 0 ? notebookSources.filter((s) => s.isActive)[0].title : 'যুক্ত করা সোর্স'})`
+                          : activeSection === 'wbbse'
+                          ? `${selectedClass} - ${selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল'}`
+                          : selectedCompetitiveSubject
+                      }):
                     </span>
-                    <span className="text-[10px] text-cyan-300 bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded-full font-medium">
-                      {activeSection === 'wbbse' ? 'WBBSE' : 'Competitive & Spoken'}
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
+                      activeSection === 'notebook'
+                        ? 'text-cyan-300 bg-cyan-950/90 border-cyan-400/50'
+                        : activeSection === 'wbbse'
+                        ? 'text-emerald-300 bg-emerald-950/90 border-emerald-500/40'
+                        : 'text-amber-300 bg-amber-950/90 border-amber-500/40'
+                    }`}>
+                      {activeSection === 'notebook' ? '📚 Google NotebookLM' : activeSection === 'wbbse' ? '🏫 WBBSE' : '🎓 Competitive & Spoken'}
                     </span>
                   </div>
                   <div className="grid grid-cols-3 gap-2 sm:gap-3">
@@ -1521,7 +1846,11 @@ export default function App() {
                             startCall(false);
                           }
                         }}
-                        placeholder="যেমন: জৈব রসায়ন, ফরাসি বিপ্লব, আলো অধ্যায় ৩, বা আপনার পছন্দের বিষয়..."
+                        placeholder={
+                          activeSection === 'notebook'
+                            ? "যেমন: এই সোর্সের মূল সূত্র, নির্দিষ্ট প্যারাগ্রাফ, বা কনসেপ্ট..."
+                            : "যেমন: জৈব রসায়ন, ফরাসি বিপ্লব, আলো অধ্যায় ৩, বা আপনার পছন্দের বিষয়..."
+                        }
                         className="w-full bg-slate-900/90 border border-slate-700/90 hover:border-cyan-500/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 placeholder-slate-500 transition-all outline-none pr-28 sm:pr-32"
                       />
                       {customStartingTopic.trim() ? (
@@ -1539,7 +1868,9 @@ export default function App() {
                       )}
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1.5 px-0.5 leading-relaxed">
-                      💡 কোনো নির্দিষ্ট অধ্যায় বা টপিক থেকে শুরু করতে চাইলে এখানে লিখে <strong>Start</strong> করুন। ফাঁকা রাখলে স্বয়ংক্রিয়ভাবে পাঠ্যবইয়ের চমৎকার কোনো সিলেবাস বিষয় দিয়ে ক্লাস শুরু হবে।
+                      {activeSection === 'notebook'
+                        ? '💡 কোনো নির্দিষ্ট সোর্স বা পয়েন্ট থেকে শুরু করতে চাইলে এখানে লিখে Start করুন। ফাঁকা রাখলে আপনার সক্রিয় সোর্স দিয়ে আলোচনা শুরু হবে।'
+                        : '💡 কোনো নির্দিষ্ট অধ্যায় বা টপিক থেকে শুরু করতে চাইলে এখানে লিখে Start করুন। ফাঁকা রাখলে স্বয়ংক্রিয়ভাবে পাঠ্যবইয়ের চমৎকার কোনো সিলেবাস বিষয় দিয়ে ক্লাস শুরু হবে।'}
                     </p>
                   </div>
 
@@ -1548,7 +1879,9 @@ export default function App() {
                     <div className="text-[11px] text-slate-300 flex items-center gap-1.5 max-w-full truncate">
                       <span className="text-slate-400 shrink-0">নির্বাচিত:</span>
                       <strong className="text-emerald-300 font-semibold truncate">
-                        {activeSection === 'wbbse'
+                        {activeSection === 'notebook'
+                          ? `গুগল নোটবুক · ${notebookSources.filter((s) => s.isActive).length}টি সোর্স`
+                          : activeSection === 'wbbse'
                           ? `${selectedClass} · ${selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল'}`
                           : selectedCompetitiveSubject}
                       </strong>
@@ -1559,7 +1892,13 @@ export default function App() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => startCall(false)}
+                      onClick={() => {
+                        if (activeSection === 'notebook') {
+                          handleStartNotebookSession(teachingMode);
+                        } else {
+                          startCall(false);
+                        }
+                      }}
                       className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm bg-gradient-to-r from-cyan-500 via-indigo-600 to-purple-600 hover:brightness-110 active:scale-95 text-white shadow-lg shadow-cyan-500/25 flex items-center justify-center gap-2 transition-all shrink-0"
                     >
                       <PhoneCall className="h-4 w-4" />
@@ -2106,6 +2445,17 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Google NotebookLM Sources Modal */}
+      <NotebookSourcesModal
+        isOpen={isNotebookModalOpen}
+        onClose={() => setIsNotebookModalOpen(false)}
+        sources={notebookSources}
+        onAddSource={handleAddNotebookSource}
+        onRemoveSource={handleRemoveNotebookSource}
+        onToggleSource={handleToggleNotebookSource}
+        onStartStudySession={handleStartNotebookSession}
+      />
     </div>
   );
 }

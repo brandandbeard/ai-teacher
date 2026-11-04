@@ -10,10 +10,28 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function getPort(): number {
+  const portArgIndex = process.argv.indexOf("--port");
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    const parsed = parseInt(process.argv[portArgIndex + 1], 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  // In Cloud Run or container environments, PORT=8080 is reserved for nginx reverse proxy.
+  if (process.env.PORT && process.env.PORT !== "8080") {
+    const parsed = parseInt(process.env.PORT, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 3000;
+}
+
 async function startServer() {
   const app = express();
-  const port = parseInt(process.env.PORT || "3000", 10);
+  const port = getPort();
   const httpServer = http.createServer(app);
+
+  // Body parsers for JSON and URL-encoded payloads with 50mb limit
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
   // Attach Gemini Live WebSocket and API endpoints
   attachLiveServer(httpServer, app);
@@ -28,7 +46,7 @@ async function startServer() {
   if (!isProduction) {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: "spa",
     });
     app.use(vite.middlewares);

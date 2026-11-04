@@ -6,6 +6,7 @@ import {
   WBBSE_HISTORY_PROMPT,
   SHREYA_MAAM_PROMPT,
   NON_STOP_TEACHING_SYSTEM_RULE,
+  GOOGLE_NOTEBOOKLM_PROMPT,
 } from '../src/data/teacherPersonas.ts';
 
 test('Scenario A: Fresh session initialization with default empty context', () => {
@@ -445,9 +446,210 @@ test('Scenario Z: Bilingual filter rejects and cleans foreign acoustic hallucina
   assert.equal(sanitizeBilingualText("d'accord"), '');
   assert.equal(isForeignHallucination('Merci beaucoup'), true);
 });
+test('Scenario AA: Bilingual filter rejects Hindi Devanagari and German acoustic hallucinations while preserving Bengali terms', async () => {
+  const { sanitizeBilingualText, isForeignHallucination } = await import('../src/utils/bilingualFilter.ts');
+  
+  // Hindi Devanagari noise (e.g. ब्रह्मास्त्र सनराइज)
+  assert.equal(sanitizeBilingualText('ब्रह्मास्त्र सनराइज'), '');
+  assert.equal(isForeignHallucination('ब्रह्मास्त्र सनराइज'), true);
+  assert.equal(sanitizeBilingualText('समोसे जी'), '');
 
+  // German acoustic hallucinations (e.g. Blihartzahnarzt, Ja. Da haben Sie)
+  assert.equal(sanitizeBilingualText('Blihartzahnarzt'), '');
+  assert.equal(isForeignHallucination('Blihartzahnarzt'), true);
+  assert.equal(sanitizeBilingualText('Ja. Da haben Sie'), '');
+  assert.equal(isForeignHallucination('Ja. Da haben Sie'), true);
 
+  // Bengali terms must be preserved with 100% fidelity
+  assert.equal(sanitizeBilingualText('লোথাল'), 'লোথাল');
+  assert.equal(sanitizeBilingualText('হরপ্পা ও মহেঞ্জোদারো'), 'হরপ্পা ও মহেঞ্জোদারো');
+  assert.equal(isForeignHallucination('লোথাল'), false);
+});
 
+test('Scenario AB: Tracks asked questions and enforces anti-repetition directive in durable context', () => {
+  const sm = new ConversationStateMachine();
+  sm.setTeachingMode('quiz', undefined, 'Indian History');
+  sm.setTopic('সিন্ধু সভ্যতা ও হরপ্পা সংস্কৃতি');
+
+  // Teacher asks question 1
+  sm.processModelOutput('হরপ্পা সভ্যতার আবিষ্কারক কে এবং কত সালে এটি আবিষ্কৃত হয়েছিল?');
+  assert.equal(sm.getAskedQuestions().length, 1);
+  assert.ok(sm.getAskedQuestions()[0].includes('হরপ্পা সভ্যতার আবিষ্কারক'));
+
+  // Teacher asks question 2
+  sm.processModelOutput('১৯২২ সালে রাখালদাস বন্দ্যোপাধ্যায় মহেঞ্জোদারো আবিষ্কার করেন। এবার বলো তো, শহরের সবচেয়ে গুরুত্বপূর্ণ স্থাপত্যের নাম কী?');
+  assert.equal(sm.getAskedQuestions().length, 2);
+
+  // Check that durable instruction includes anti-repetition list
+  const instruction = sm.generateDurableContextInstruction();
+  assert.ok(instruction.includes('ALREADY ASKED QUESTIONS (STRICT ANTI-REPETITION RULE)'));
+  assert.ok(instruction.includes('হরপ্পা'));
+  assert.ok(instruction.includes('স্থপতি') || instruction.includes('স্থাপত্যের'));
+  assert.ok(instruction.includes('Ask a completely fresh, NEW question'));
+
+  // When topic is cleared or changed, asked questions are reset
+  sm.clearTopic();
+  assert.equal(sm.getAskedQuestions().length, 0);
+});
+
+test('Scenario AC: Google NotebookLM Sources management and grounding in durable context instruction', () => {
+  const sm = new ConversationStateMachine();
+  sm.setTeachingMode('lecture', undefined, 'Google NotebookLM');
+
+  // Add YouTube source
+  sm.addNotebookSource({
+    id: 'src-1',
+    type: 'youtube',
+    title: 'Harappan Civilization Documentary',
+    summary: 'A comprehensive video on Mohenjo-daro Great Bath and Harappan trade routes.',
+    content: 'Full video breakdown of Lothal dockyard, bronze sculptures, and seal scripts.',
+    keyPoints: ['Lothal port', 'Great Bath', 'Bronze dancing girl'],
+    url: 'https://www.youtube.com/watch?v=sample123',
+    isActive: true,
+    createdAt: Date.now(),
+  });
+
+  // Add PDF source
+  sm.addNotebookSource({
+    id: 'src-2',
+    type: 'pdf',
+    title: 'Class 10 History Chapter 2 Notes.pdf',
+    summary: 'Chapter notes detailing Rakhaldas Bandyopadhyay and Daya Ram Sahni excavations.',
+    content: 'Archaeological surveys conducted in 1921 and 1922.',
+    keyPoints: ['1921 Daya Ram Sahni', '1922 Rakhaldas Bandyopadhyay'],
+    fileName: 'history_ch2.pdf',
+    isActive: true,
+    createdAt: Date.now(),
+  });
+
+  // Add inactive Image source
+  sm.addNotebookSource({
+    id: 'src-3',
+    type: 'image',
+    title: 'Textbook Diagram of Indus Valley Seals',
+    summary: 'Pashupati seal and unicorn seals.',
+    content: 'Steatite seals analysis.',
+    isActive: false,
+    createdAt: Date.now(),
+  });
+
+  assert.equal(sm.getNotebookSources().length, 3);
+  assert.equal(sm.getActiveNotebookSources().length, 2);
+  assert.equal(sm.getContext().activeSourcesCount, 2);
+
+  // Generate durable context instruction
+  const instruction = sm.generateDurableContextInstruction();
+  assert.ok(instruction.includes('GOOGLE NOTEBOOKLM VERIFIED SOURCES'));
+  assert.ok(instruction.includes('Harappan Civilization Documentary'));
+  assert.ok(instruction.includes('Class 10 History Chapter 2 Notes.pdf'));
+  assert.ok(instruction.includes('Lothal port'));
+  // Inactive source should not appear in active context
+  assert.ok(!instruction.includes('Textbook Diagram of Indus Valley Seals'));
+
+  // Toggle active status
+  sm.toggleNotebookSource('src-3');
+  assert.equal(sm.getActiveNotebookSources().length, 3);
+  assert.ok(sm.generateDurableContextInstruction().includes('Textbook Diagram of Indus Valley Seals'));
+
+  // Remove source
+  sm.removeNotebookSource('src-1');
+  assert.equal(sm.getNotebookSources().length, 2);
+  assert.ok(!sm.generateDurableContextInstruction().includes('Harappan Civilization Documentary'));
+});
+
+test('Scenario AD: Dedicated Google NotebookLM persona and 3 teaching modes', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(GOOGLE_NOTEBOOKLM_PROMPT);
+
+  assert.equal(sm.getContext().personaId, 'google-notebook');
+  assert.equal(sm.getContext().subject, 'Google NotebookLM');
+  assert.equal(sm.getContext().classGrade, undefined);
+
+  // Add a source
+  sm.addNotebookSource({
+    id: 'src-cell',
+    type: 'pdf',
+    title: 'Cell Biology & Mitochondria Notes.pdf',
+    summary: 'Structure of mitochondria, ATP synthesis and cellular respiration.',
+    content: 'Mitochondria are double-membraned organelles that produce ATP.',
+    isActive: true,
+    createdAt: Date.now(),
+  });
+
+  // Test Mode 1: Lecture (আলোচনা)
+  sm.setTeachingMode('lecture', undefined, 'Google NotebookLM');
+  sm.setTopic('নোটবুক: Cell Biology & Mitochondria Notes.pdf');
+  const lectureDirective = sm.getTeachingModeDirective();
+  assert.ok(lectureDirective.includes('গুগল নোটবুক আলোচনা'));
+  assert.ok(lectureDirective.includes('Google NotebookLM'));
+  assert.ok(!lectureDirective.includes('পশ্চিমবঙ্গ মধ্যশিক্ষা পর্ষদ'));
+
+  // Test Mode 2: Doubts (AI কে প্রশ্ন)
+  sm.setTeachingMode('doubts', undefined, 'Google NotebookLM');
+  const doubtsDirective = sm.getTeachingModeDirective();
+  assert.ok(doubtsDirective.includes('গুগল নোটবুক AI কে প্রশ্ন'));
+
+  // Test Mode 3: Quiz (প্রশ্ন উত্তর)
+  sm.setTeachingMode('quiz', undefined, 'Google NotebookLM');
+  const quizDirective = sm.getTeachingModeDirective();
+  assert.ok(quizDirective.includes('গুগল নোটবুক প্রশ্ন উত্তর'));
+  assert.ok(quizDirective.includes('মৌখিক কুইজ ও ভাইভা'));
+
+  // Durable context check
+  const durable = sm.generateDurableContextInstruction();
+  assert.ok(durable.includes('STRICT GOOGLE NOTEBOOKLM EXCLUSIVE GROUNDING DIRECTIVE'));
+  assert.ok(durable.includes('Cell Biology & Mitochondria Notes.pdf'));
+  assert.ok(durable.includes('ATP synthesis'));
+});
+
+test('Scenario AE: Google NotebookLM student input does not trigger WBBSE regexes or subject switch', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(GOOGLE_NOTEBOOKLM_PROMPT);
+  sm.setTeachingMode('lecture', undefined, 'Google NotebookLM');
+
+  sm.addNotebookSource({
+    id: 'src-yt-1',
+    type: 'youtube',
+    title: 'YouTube Lecture: Motion & Newton Laws',
+    summary: 'Laws of motion explained in Bengali.',
+    content: 'Full video lecture transcription about motion.',
+    isActive: true,
+    createdAt: Date.now(),
+  });
+
+  sm.setTopic('নোটবুক: YouTube Lecture: Motion & Newton Laws');
+
+  // Student says "আলোচনা শুরু করো" (contains "আলো" which previously hijacked to Light!)
+  sm.processStudentInput('এই ভিডিও নিয়ে আলোচনা শুরু করো');
+
+  // Verify subject remains Google NotebookLM and topic is NOT hijacked to WBBSE Light
+  assert.equal(sm.getContext().subject, 'Google NotebookLM');
+  assert.equal(sm.getContext().currentTopic, 'নোটবুক: YouTube Lecture: Motion & Newton Laws');
+  assert.equal(sm.getContext().classGrade, undefined);
+
+  // Student mentions "ভৌতবিজ্ঞান" or "অধ্যায় ২"
+  sm.processStudentInput('ভৌতবিজ্ঞান অধ্যায় ২ এর প্রশ্ন বলো');
+  assert.equal(sm.getContext().subject, 'Google NotebookLM');
+  assert.equal(sm.getContext().classGrade, undefined);
+});
+
+test('Scenario AF: pickRandomTopic in Google NotebookLM returns notebook sources', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(GOOGLE_NOTEBOOKLM_PROMPT);
+  sm.addNotebookSource({
+    id: 'src-yt-phys',
+    type: 'youtube',
+    title: 'Class 10 Environment & Atmosphere',
+    summary: 'Troposphere and stratosphere overview.',
+    content: 'Atmospheric layers details.',
+    isActive: true,
+    createdAt: Date.now(),
+  });
+
+  const topic = sm.pickRandomTopic();
+  assert.equal(topic, 'নোটবুক: Class 10 Environment & Atmosphere');
+  assert.equal(sm.getContext().currentTopic, 'নোটবুক: Class 10 Environment & Atmosphere');
+});
 
 
 

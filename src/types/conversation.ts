@@ -3,6 +3,8 @@
  * Used for strict tracking of teaching progress, topic switching, and seamless resumption.
  */
 
+import type { NotebookSource } from './notebook.ts';
+
 export type ConversationState =
   | 'INITIALIZING'       // Genuinely new teaching session is being initialized
   | 'READY'              // Connected and ready for student's first request
@@ -38,6 +40,8 @@ export interface TeachingContextSummary {
   resumptionCount: number;
   resumptionHandle: string | null;
   lastUpdated: number;
+  notebookSources?: NotebookSource[];
+  activeSourcesCount?: number;
 }
 
 export type StudentIntentType =
