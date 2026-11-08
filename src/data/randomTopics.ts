@@ -1165,6 +1165,13 @@ export const COMPETITIVE_TOPICS: Record<string, string[]> = {
 ],
 };
 
+// Alias for Indian History combining Ancient, Medieval, and Modern History
+COMPETITIVE_TOPICS['Indian History'] = [
+  ...(COMPETITIVE_TOPICS['Ancient History'] || []),
+  ...(COMPETITIVE_TOPICS['Medieval History'] || []),
+  ...(COMPETITIVE_TOPICS['Modern History'] || []),
+];
+
 /**
  * Get a fresh randomized topic for the selected class/subject
  */
@@ -1182,9 +1189,11 @@ export function getRandomTopic(subject: string, className?: string): string {
     return list[Math.floor(Math.random() * list.length)];
   }
 
-  if (normSubj.includes('indian history')) {
-    const list = COMPETITIVE_TOPICS['Indian History'];
-    return list[Math.floor(Math.random() * list.length)];
+  if (normSubj.includes('history') || normSubj.includes('ইতিহাস')) {
+    const list = COMPETITIVE_TOPICS['Indian History'] || [];
+    if (list.length > 0) {
+      return list[Math.floor(Math.random() * list.length)];
+    }
   }
 
   if (normSubj.includes('polity') || normSubj.includes('constitution')) {

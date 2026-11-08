@@ -586,6 +586,7 @@ export class ConversationStateMachine {
   public processModelOutput(text: string) {
     if (!text) return;
     this.context.isLessonStarted = true;
+    this.context.lastModelOutput = text.slice(-350).trim();
 
     // Detect if teacher asked a pop-quiz / attention check question
     const isAskingQuestion =
@@ -850,6 +851,9 @@ export class ConversationStateMachine {
     if (this.context.lastStudentInput) {
       parts.push(`Student's most recent statement/question: "${this.context.lastStudentInput}"`);
     }
+    if (this.context.lastModelOutput) {
+      parts.push(`Teacher's most recent explanation/sentence: "${this.context.lastModelOutput}"`);
+    }
 
     parts.push('\n### ACTIVE MODE INSTRUCTIONS:');
     parts.push(modeDirective);
@@ -896,6 +900,50 @@ export class ConversationStateMachine {
 
     parts.push('[END ACTIVE LESSON CONTEXT]\n');
     return parts.join('\n');
+  }
+
+  /**
+   * Generates a precise continuation prompt after reconnecting so Gemini Live
+   * immediately resumes teaching the exact topic, mode, class, and chapter without repeating or greeting.
+   */
+  public generateReconnectionPrompt(): string {
+    const ctx = this.getContext();
+    const topic = ctx.currentTopic || (ctx.subject ? `${ctx.subject} পাঠদান` : 'চলমান বিষয়');
+    const mode = ctx.teachingMode || 'lecture';
+    const lastSaid = ctx.lastModelOutput;
+    const isNotebook = ctx.personaId === 'google-notebook' || ctx.subject === 'Google NotebookLM';
+
+    if (isNotebook) {
+      if (mode === 'lecture') {
+        return `[সেশন রিকানেকশন — নিরবচ্ছিন্ন নোটবুক আলোচনা চালিয়ে যান]: আমরা নোটবুক সোর্স "${topic}" নিয়ে আলোচনা করছিলাম। কোনো প্রাথমিক সম্ভাষণ বা শুভেচ্ছা ("নমস্কার", "হ্যালো" ইত্যাদি) একেবারেই না বলে, যেখানে আলোচনা থেমেছিল সেখান থেকেই পরবর্তী গুরুত্বপূর্ণ পয়েন্ট ও তত্ত্ব অনর্গল বাংলায় একটানা বুঝিয়ে যান।`;
+      } else if (mode === 'doubts') {
+        return `[সেশন রিকানেকশন — নোটবুক ডাউট সলভ চালু]: আমরা নোটবুক উপাদান "${topic}" নিয়ে আলোচনা করছিলাম। সংযোগ মসৃণভাবে সচল আছে। কোনো কৃত্রিম সম্ভাষণ ছাড়া সংক্ষেপে ১ লাইনে বলুন যে নোটবুক সোর্স থেকে ছাত্রের যেকোনো প্রশ্ন শোনার জন্য আপনি প্রস্তুত।`;
+      } else {
+        const pendingQ = ctx.pendingQuestion;
+        return pendingQ
+          ? `[সেশন রিকানেকশন — নোটবুক কুইজের উত্তর গ্রহণ]: আমরা "${topic}" থেকে মৌখিক প্রশ্ন করেছিলাম: "${pendingQ}"। কোনো ভূমিকা ছাড়া স্বাভাবিক কণ্ঠে ছাত্রকে প্রশ্নটির উত্তর দিতে বলুন।`
+          : `[সেশন রিকানেকশন — পরবর্তী নোটবুক কুইজ প্রশ্ন]: আমরা "${topic}" থেকে মৌখিক কুইজ নিচ্ছিলাম। কোনো সম্ভাষণ ছাড়া সরাসরি পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।`;
+      }
+    }
+
+    // WBBSE or Competitive Subjects
+    const classLabel = ctx.classGrade ? ` (${ctx.classGrade})` : '';
+    const subjName = ctx.subject || '';
+
+    if (mode === 'lecture') {
+      const excerpt = lastSaid ? (lastSaid.length > 200 ? lastSaid.slice(0, 190) + '...' : lastSaid) : '';
+      const continuationHint = excerpt
+        ? `সর্বশেষ ব্যাখ্যা করা হচ্ছিল: "${excerpt}" — ঠিক এখান থেকেই পরবর্তী ধারণা ও পয়েন্ট অনর্গল বাংলায় একটানা বুঝিয়ে যান।`
+        : `কোনো ভূমিকা না নিয়ে সরাসরি "${topic}" বিষয়ের পরবর্তী গভীর ও বিশদ তথ্য অনর্গল বাংলায় বুঝিয়ে যান।`;
+      return `[সেশন রিকানেকশন — নিরবচ্ছিন্ন পাঠদান অব্যাহত রাখুন]: আমাদের ${subjName}${classLabel} বিষয়ের "${topic}" অধ্যায়ের পাঠদান চলছিল। কোনো প্রাথমিক সম্ভাষণ (যেমন "নমস্কার", "হ্যালো", বা "শুনতে পাচ্ছ") একেবারেই বলবেন না। ${continuationHint}`;
+    } else if (mode === 'quiz') {
+      const pendingQ = ctx.pendingQuestion;
+      return pendingQ
+        ? `[সেশন রিকানেকশন — কুইজের উত্তর গ্রহণ]: আমাদের ${subjName}${classLabel} বিষয়ের "${topic}" অধ্যায়ের মৌখিক কুইজ চলছিল। শিক্ষক প্রশ্ন করেছিলেন: "${pendingQ}"। কোনো অপ্রয়োজনীয় ভূমিকা বা সম্ভাষণ ছাড়া স্বাভাবিক কণ্ঠে ছাত্রকে বলুন প্রশ্নটির উত্তর দিতে।`
+        : `[সেশন রিকানেকশন — পরবর্তী কুইজ প্রশ্ন]: আমাদের ${subjName}${classLabel} বিষয়ের "${topic}" অধ্যায়ের মৌখিক কুইজ চলছিল। কোনো সম্ভাষণ ছাড়া সরাসরি এই অধ্যায়ের পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।`;
+    } else {
+      return `[সেশন রিকানেকশন — ডাউট সেশন অব্যাহত]: আমাদের ${subjName}${classLabel} বিষয়ের "${topic}" অধ্যায়ের ডাউট সেশন চলছিল। কোনো প্রাথমিক ভূমিকা বা সম্ভাষণ ছাড়া সংক্ষেপে স্বাভাবিকভাবে বলুন যে আপনি প্রস্তুত এবং ছাত্রকে "${topic}" নিয়ে প্রশ্ন করতে বলুন।`;
+    }
   }
 }
 

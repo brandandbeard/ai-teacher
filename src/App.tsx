@@ -139,6 +139,7 @@ export default function App() {
   const lastResumptionHandleRef = useRef<string | null>(null);
   const inactivityTimeoutRef = useRef<number | null>(null);
   const hasKickoffSentRef = useRef<boolean>(false);
+  const isReconnectingRef = useRef<boolean>(false);
 
   useEffect(() => {
     callStatusRef.current = callStatus;
@@ -441,7 +442,7 @@ export default function App() {
           })
         );
 
-        if (targetSection === 'notebook') {
+        if (!isAutoRenew && targetSection === 'notebook') {
           const ctx = conversationStateMachine.getContext();
           const activeTopic = ctx.currentTopic || 'গুগল নোটবুক সোর্সেস';
           const kickOffPrompt = targetMode === 'lecture'
@@ -488,7 +489,7 @@ export default function App() {
 
           if (msg.type === 'status') {
             if (msg.status === 'renewing') {
-              setStatusMessage('Refreshing cloud connection seamlessly...');
+              isReconnectingRef.current = true;
               return;
             }
 
@@ -501,7 +502,16 @@ export default function App() {
                 lastResumptionHandleRef.current = msg.resumptionHandle;
                 conversationStateMachine.setResumptionHandle(msg.resumptionHandle);
               }
-              if (!isAutoRenew && !hasKickoffSentRef.current && !msg.resumed) {
+
+              // SEAMLESS RECONNECT / SESSION RENEWAL CONTINUATION:
+              // Immediately resume speaking the exact ongoing topic, class, chapter, and mode!
+              if (isAutoRenew || isReconnectingRef.current) {
+                isReconnectingRef.current = false;
+                const resumePrompt = conversationStateMachine.generateReconnectionPrompt();
+                if (resumePrompt && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(JSON.stringify({ type: 'text', text: resumePrompt }));
+                }
+              } else if (!hasKickoffSentRef.current && !msg.resumed) {
                 hasKickoffSentRef.current = true;
                 addTranscript('system', `Connected to ${model} with voice '${voice}'`);
 
@@ -630,20 +640,21 @@ export default function App() {
       ws.onerror = (err) => {
         conversationStateMachine.releaseReconnectLock();
         console.error('WebSocket error:', err);
-        setErrorMessage('Connection issue detected. Please check network connectivity and microphone access.');
+        if (callStatusRef.current === 'idle') {
+          setErrorMessage('Connection issue detected. Please check network connectivity and microphone access.');
+        }
       };
 
       ws.onclose = () => {
         conversationStateMachine.releaseReconnectLock();
-        // If user didn't intentionally stop the call, auto-reconnect!
+        // If user didn't intentionally stop the call, auto-reconnect completely seamlessly!
         if (callStatusRef.current !== 'idle') {
-          setStatusMessage('Refreshing 5-minute session...');
-          addTranscript('system', 'Reconnecting session seamlessly...');
+          isReconnectingRef.current = true;
           setTimeout(() => {
             if (callStatusRef.current !== 'idle') {
               startCall(true);
             }
-          }, 1200);
+          }, 250);
         }
       };
     } catch (err: any) {

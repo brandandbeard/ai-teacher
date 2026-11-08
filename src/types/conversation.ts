@@ -33,6 +33,7 @@ export interface TeachingContextSummary {
   pendingQuestion?: string;     // Last question teacher asked before waiting
   popQuizPending: boolean;      // Whether teacher asked a checkpoint question
   lastStudentInput?: string;    // Last recognized student transcript/message
+  lastModelOutput?: string;     // Last spoken/explained output from the model
   conversationState: ConversationState;
   turnCount: number;
   turnsCompleted: number;       // Alias for turnCount

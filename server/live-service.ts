@@ -950,7 +950,9 @@ Return STRICT valid JSON only with NO markdown fences matching this schema:
             if (contextSummary.classGrade) metaParts.push(`Class="${contextSummary.classGrade}"`);
             if (contextSummary.chapter) metaParts.push(`Chapter="${contextSummary.chapter}"`);
             metaParts.push(`Topic="${contextSummary.currentTopic}"`);
-            sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: ${metaParts.join(', ')}. Strictly teach ONLY this active subject and topic. DO NOT mix any other subject or say any initial greeting. Immediately resume continuous teaching of this topic.]`;
+            if (contextSummary.teachingMode) metaParts.push(`TeachingMode="${contextSummary.teachingMode}"`);
+            if (contextSummary.lastModelOutput) metaParts.push(`LastExplainedConcept="${contextSummary.lastModelOutput.slice(-150)}"`);
+            sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: ${metaParts.join(', ')}. Strictly teach ONLY this active subject, class, mode, and topic. DO NOT mix any other subject or say any initial greeting. Immediately resume continuous teaching of this topic.]`;
           }
 
           // Strict Bilingual Directive: Guarantee student speech is recognized exclusively as Bengali or English

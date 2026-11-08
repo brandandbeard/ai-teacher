@@ -8,6 +8,7 @@ import {
   NON_STOP_TEACHING_SYSTEM_RULE,
   GOOGLE_NOTEBOOKLM_PROMPT,
 } from '../src/data/teacherPersonas.ts';
+import { COMPETITIVE_TOPICS } from '../src/data/randomTopics.ts';
 
 test('Scenario A: Fresh session initialization with default empty context', () => {
   const sm = new ConversationStateMachine();
@@ -345,23 +346,13 @@ test('Scenario T: Competitive subject selection (Science & Tech, Indian History)
   
   // Competitive Science & Technology
   const compTopic = sm.pickRandomTopic('Science & Technology');
-  assert.ok(compTopic.includes('ISRO') || compTopic.includes('ডিআরডিও') || compTopic.includes('পারমাণবিক') || compTopic.includes('বায়োটেকনোলজি') || compTopic.includes('কৃত্রিম বুদ্ধিমত্তা') || compTopic.includes('শক্তি'));
+  assert.ok(COMPETITIVE_TOPICS['Science & Technology'].includes(compTopic));
   // Must NOT be WBBSE Class 10 Light
   assert.ok(!compTopic.includes('গোলীয় দর্পণ'));
 
   // Competitive Indian History
   const histTopic = sm.pickRandomTopic('Indian History');
-  assert.ok(
-    histTopic.includes('সিন্ধু') ||
-    histTopic.includes('মৌর্য') ||
-    histTopic.includes('গুপ্ত') ||
-    histTopic.includes('সুলতানি') ||
-    histTopic.includes('মুঘল') ||
-    histTopic.includes('পলাশী') ||
-    histTopic.includes('মহাবিদ্রোহ') ||
-    histTopic.includes('গান্ধী') ||
-    histTopic.includes('নেতাজি')
-  );
+  assert.ok(COMPETITIVE_TOPICS['Indian History'].includes(histTopic));
 });
 
 test('Scenario U: User request "জৈব রসায়ন আলোচনা করো।" updates topic to Organic Chemistry', () => {
@@ -649,6 +640,46 @@ test('Scenario AF: pickRandomTopic in Google NotebookLM returns notebook sources
   const topic = sm.pickRandomTopic();
   assert.equal(topic, 'নোটবুক: Class 10 Environment & Atmosphere');
   assert.equal(sm.getContext().currentTopic, 'নোটবুক: Class 10 Environment & Atmosphere');
+});
+
+test('Scenario AG: Reconnection prompt preserves topic, mode, class, and continues ongoing discussion without greeting', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  sm.setTeachingMode('lecture', 'Class 10', 'বিজ্ঞান');
+  sm.setTopic('গ্যাসের আচরণ: বয়েলের সূত্র ও চার্লসের সূত্র');
+
+  // Teacher was in the middle of explaining Charles's Law
+  sm.processModelOutput('চার্লসের সূত্রানুসারে স্থির চাপে নির্দিষ্ট ভরের গ্যাসের আয়তন প্রতি ডিগ্রি সেলসিয়াস তাপমাত্রা বৃদ্ধি বা হ্রাসের জন্য 0 ডিগ্রি সেলসিয়াস তাপমাত্রার আয়তনের 1/273 অংশ পরিবর্তিত হয়।');
+  
+  assert.equal(sm.getContext().classGrade, 'Class 10');
+  assert.equal(sm.getContext().subject, 'বিজ্ঞান');
+  assert.equal(sm.getContext().teachingMode, 'lecture');
+  assert.ok(sm.getContext().lastModelOutput?.includes('চার্লসের সূত্রানুসারে'));
+
+  // Reconnection happens
+  const reconnPrompt = sm.generateReconnectionPrompt();
+  assert.ok(reconnPrompt.includes('গ্যাসের আচরণ: বয়েলের সূত্র ও চার্লসের সূত্র'));
+  assert.ok(reconnPrompt.includes('Class 10'));
+  assert.ok(reconnPrompt.includes('কোনো প্রাথমিক সম্ভাষণ'));
+  assert.ok(reconnPrompt.includes('চার্লসের সূত্রানুসারে'));
+});
+
+test('Scenario AH: Reconnection prompt in quiz mode preserves pending question', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  sm.setTeachingMode('quiz', 'Class 10', 'বিজ্ঞান');
+  sm.setTopic('আলো: গোলীয় দর্পণ ও লেন্স');
+
+  // Teacher asked a checkpoint quiz question
+  sm.processModelOutput('বলো তো অবতল দর্পণের বক্রতা ব্যাসার্ধ এবং ফোকাস দূরত্বের মধ্যে গাণিতিক সম্পর্কটি কী?');
+  assert.equal(sm.getContext().popQuizPending, true);
+  assert.ok(sm.getContext().pendingQuestion?.includes('বক্রতা ব্যাসার্ধ'));
+
+  // Reconnection happens during quiz
+  const reconnPrompt = sm.generateReconnectionPrompt();
+  assert.ok(reconnPrompt.includes('আলো: গোলীয় দর্পণ ও লেন্স'));
+  assert.ok(reconnPrompt.includes('বক্রতা ব্যাসার্ধ'));
+  assert.ok(reconnPrompt.includes('কুইজের উত্তর গ্রহণ'));
 });
 
 
