@@ -541,6 +541,8 @@ Return STRICT valid JSON only with NO markdown fences matching this schema:
     const pendingAudioQueue: string[] = [];
     // Text buffer to queue student text messages while session is initializing or reconnecting
     const pendingTextQueue: string[] = [];
+    // Audio gating timestamp to prevent server VAD barge-in from cancelling continuation text prompts
+    let ignoreAudioUntil = 0;
 
     // Heartbeat keep-alive every 10s to prevent proxy/Cloud Run idle timeouts
     const heartbeatInterval = setInterval(() => {
@@ -952,6 +954,13 @@ Return STRICT valid JSON only with NO markdown fences matching this schema:
             metaParts.push(`Topic="${contextSummary.currentTopic}"`);
             if (contextSummary.teachingMode) metaParts.push(`TeachingMode="${contextSummary.teachingMode}"`);
             if (contextSummary.lastModelOutput) metaParts.push(`LastExplainedConcept="${contextSummary.lastModelOutput.slice(-150)}"`);
+            if (contextSummary.recentDialogueHistory && Array.isArray(contextSummary.recentDialogueHistory) && contextSummary.recentDialogueHistory.length > 0) {
+              const histSummary = contextSummary.recentDialogueHistory
+                .slice(-5)
+                .map((t: any) => `${t.role === 'user' ? 'Student' : 'Teacher'}: "${t.text}"`)
+                .join(' | ');
+              metaParts.push(`RecentTurns="${histSummary}"`);
+            }
             sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: ${metaParts.join(', ')}. Strictly teach ONLY this active subject, class, mode, and topic. DO NOT mix any other subject or say any initial greeting. Immediately resume continuous teaching of this topic.]`;
           }
 
@@ -994,6 +1003,11 @@ Return STRICT valid JSON only with NO markdown fences matching this schema:
 
         // Realtime audio streaming from client (16kHz PCM little-endian)
         if (message.type === "audio" && message.data) {
+          if (Date.now() < ignoreAudioUntil) {
+            // Drop client mic audio briefly during continuation prompt injection
+            // This prevents server VAD from instantly cancelling the model's continuation speech
+            return;
+          }
           if (liveSession && isConnected) {
             try {
               liveSession.sendRealtimeInput({
@@ -1036,6 +1050,8 @@ Return STRICT valid JSON only with NO markdown fences matching this schema:
 
         // Direct text input injected into live conversation (acts like speech)
         if (message.type === "text" && message.text) {
+          // Gate incoming mic audio for 750ms so background mic noise doesn't abort model continuation
+          ignoreAudioUntil = Date.now() + 750;
           if (liveSession && isConnected) {
             try {
               liveSession.sendClientContent({

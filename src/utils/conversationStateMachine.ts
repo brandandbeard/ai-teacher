@@ -19,6 +19,7 @@ export class ConversationStateMachine {
   private reconnectLockTimer: any = null;
   private askedQuestions: string[] = [];
   private notebookSources: NotebookSource[] = [];
+  private recentDialogueHistory: Array<{ role: 'user' | 'model'; text: string }> = [];
   private listeners: Set<(context: TeachingContextSummary, state: ConversationState) => void> = new Set();
 
   constructor(personaId: string = 'wbbse-science', personaTitle: string = 'বিজ্ঞান (ভৌত+জীবন · Class V - X)') {
@@ -54,6 +55,7 @@ export class ConversationStateMachine {
       className: this.context.classGrade,
       notebookSources: [...this.notebookSources],
       activeSourcesCount: activeSources.length,
+      recentDialogueHistory: [...this.recentDialogueHistory],
     };
   }
 
@@ -109,10 +111,17 @@ export class ConversationStateMachine {
   public clearTopic() {
     this.context.currentTopic = null;
     this.context.chapter = undefined;
+    this.context.classGrade = undefined;
+    this.context.className = undefined;
     this.context.isLessonStarted = false;
     this.context.pendingQuestion = undefined;
     this.context.popQuizPending = false;
+    this.context.lastModelOutput = undefined;
+    this.context.lastStudentInput = undefined;
+    this.context.conceptsCovered = [];
+    this.context.topicHistory = [];
     this.askedQuestions = [];
+    this.recentDialogueHistory = [];
     this.notify();
   }
 
@@ -244,6 +253,12 @@ export class ConversationStateMachine {
     this.context.turnCount++;
     this.context.turnsCompleted = this.context.turnCount;
 
+    // Record turn in recent dialogue history for session continuity
+    this.recentDialogueHistory.push({ role: 'user', text: text.slice(0, 300) });
+    if (this.recentDialogueHistory.length > 8) {
+      this.recentDialogueHistory.shift();
+    }
+
     const lower = text.toLowerCase();
 
     // Check for explicit new lesson request
@@ -261,9 +276,12 @@ export class ConversationStateMachine {
       this.context.chapter = undefined;
       this.context.currentTopic = null;
       this.context.lastCompletedConcept = undefined;
+      this.context.lastModelOutput = undefined;
+      this.context.lastStudentInput = undefined;
       this.context.pendingQuestion = undefined;
       this.context.conceptsCovered = [];
       this.context.topicHistory = [];
+      this.recentDialogueHistory = [];
       this.transitionTo('PROCESSING_INPUT', 'Explicit new lesson request');
       return {
         type: 'START_NEW_LESSON',
@@ -288,8 +306,27 @@ export class ConversationStateMachine {
       };
     }
 
-    const isSpokenEnglish = this.context.personaId === 'shreya-maam' || this.context.subject === 'Spoken English';
-    const isCompetitive = ['history-sir', 'polity-sir', 'economy-sir'].includes(this.context.personaId);
+    const isSpokenEnglish = this.context.personaId === 'spoken-english' || this.context.personaId === 'shreya-maam' || this.context.subject === 'Spoken English';
+    const isCompetitive = [
+      'spoken-english',
+      'indian-history',
+      'polity-constitution',
+      'indian-economy',
+      'geography-astronomy',
+      'science-tech',
+      'static-gk',
+      'history-sir',
+      'polity-sir',
+      'economy-sir'
+    ].includes(this.context.personaId) || [
+      'Spoken English',
+      'Indian History',
+      'Polity & Constitution',
+      'Indian Economy',
+      'Geography & Astronomy',
+      'Science & Technology',
+      'Static GK'
+    ].includes(this.context.subject || '');
     const isNotebook = this.context.personaId === 'google-notebook' || this.context.subject === 'Google NotebookLM';
 
     // Check for translation request (Bengali to English translation drill)
@@ -588,6 +625,15 @@ export class ConversationStateMachine {
     this.context.isLessonStarted = true;
     this.context.lastModelOutput = text.slice(-350).trim();
 
+    // Record model turn in recent dialogue history
+    const snippet = text.slice(-300).trim();
+    if (snippet) {
+      this.recentDialogueHistory.push({ role: 'model', text: snippet });
+      if (this.recentDialogueHistory.length > 8) {
+        this.recentDialogueHistory.shift();
+      }
+    }
+
     // Detect if teacher asked a pop-quiz / attention check question
     const isAskingQuestion =
       text.includes('দাঁড়াও! মন দিয়ে শুনছ তো') ||
@@ -655,11 +701,13 @@ export class ConversationStateMachine {
     this.releaseReconnectLock();
     this.resumptionHandle = null;
     this.askedQuestions = [];
+    this.recentDialogueHistory = [];
     this.context = {
       personaId: keepPersona ? this.context.personaId : 'wbbse-science',
       personaTitle: keepPersona ? this.context.personaTitle : 'বিজ্ঞান (ভৌত+জীবন · Class V - X)',
       subject: keepPersona ? this.context.subject : 'WBBSE Science',
       classGrade: undefined,
+      className: undefined,
       chapter: undefined,
       currentTopic: null,
       conceptsCovered: [],
@@ -672,6 +720,8 @@ export class ConversationStateMachine {
       resumptionHandle: null,
       conversationState: 'INITIALIZING',
       lastUpdated: Date.now(),
+      lastModelOutput: undefined,
+      lastStudentInput: undefined,
     };
     this.notify();
   }
@@ -855,6 +905,13 @@ export class ConversationStateMachine {
       parts.push(`Teacher's most recent explanation/sentence: "${this.context.lastModelOutput}"`);
     }
 
+    if (this.recentDialogueHistory && this.recentDialogueHistory.length > 0) {
+      parts.push('\n### RECENT DIALOGUE TURNS (FOR SMOOTH SEAMLESS CONTINUATION):');
+      this.recentDialogueHistory.slice(-5).forEach((item) => {
+        parts.push(`- ${item.role === 'user' ? 'Student' : 'Teacher'}: "${item.text}"`);
+      });
+    }
+
     parts.push('\n### ACTIVE MODE INSTRUCTIONS:');
     parts.push(modeDirective);
 
@@ -912,6 +969,27 @@ export class ConversationStateMachine {
     const mode = ctx.teachingMode || 'lecture';
     const lastSaid = ctx.lastModelOutput;
     const isNotebook = ctx.personaId === 'google-notebook' || ctx.subject === 'Google NotebookLM';
+    const isSpokenEnglish = ctx.personaId === 'spoken-english' || ctx.personaId === 'shreya-maam' || ctx.subject === 'Spoken English';
+    const isCompetitive = [
+      'spoken-english',
+      'indian-history',
+      'polity-constitution',
+      'indian-economy',
+      'geography-astronomy',
+      'science-tech',
+      'static-gk',
+      'history-sir',
+      'polity-sir',
+      'economy-sir'
+    ].includes(ctx.personaId) || [
+      'Spoken English',
+      'Indian History',
+      'Polity & Constitution',
+      'Indian Economy',
+      'Geography & Astronomy',
+      'Science & Technology',
+      'Static GK'
+    ].includes(ctx.subject || '');
 
     if (isNotebook) {
       if (mode === 'lecture') {
@@ -926,7 +1004,44 @@ export class ConversationStateMachine {
       }
     }
 
-    // WBBSE or Competitive Subjects
+    // 1. Spoken English Persona (Strictly English Only to match Shreya Ma'am's mandate)
+    if (isSpokenEnglish) {
+      const excerpt = lastSaid ? (lastSaid.length > 200 ? lastSaid.slice(0, 190) + '...' : lastSaid) : '';
+      if (mode === 'lecture') {
+        const hint = excerpt
+          ? `You were explaining: "${excerpt}". Continue seamlessly right from this point in clear, natural English without any greeting!`
+          : `Continue explaining the key English conversational nuances and patterns of "${topic}" seamlessly in clear, natural English!`;
+        return `[SESSION RECONNECTION — SEAMLESS ENGLISH PRACTICE]: We were practicing Spoken English topic "${topic}". Do NOT say any greetings, "hello", or introductory remarks. ${hint}`;
+      } else if (mode === 'quiz') {
+        const pendingQ = ctx.pendingQuestion;
+        return pendingQ
+          ? `[SESSION RECONNECTION — ORAL QUIZ ANSWER]: We were doing an oral English speaking drill on "${topic}". You asked the student: "${pendingQ}". Without any greeting, naturally encourage the student to answer now.`
+          : `[SESSION RECONNECTION — NEXT ENGLISH DRILL]: We were practicing oral English drills on "${topic}". Without any greeting, immediately ask the student the next practical spoken English speaking challenge or question.`;
+      } else {
+        return `[SESSION RECONNECTION — DOUBT CLEARING]: We were having a doubt-clearing session on Spoken English topic "${topic}". Without any greeting, tell the student you are ready for their questions or sentences in natural English.`;
+      }
+    }
+
+    // 2. Competitive Exam Subjects (WBCS, SSC CGL, Railways, UPSC - no school class tags)
+    if (isCompetitive) {
+      const subjName = ctx.subject || 'কম্পিটিটিভ পরীক্ষা';
+      const excerpt = lastSaid ? (lastSaid.length > 200 ? lastSaid.slice(0, 190) + '...' : lastSaid) : '';
+      if (mode === 'lecture') {
+        const continuationHint = excerpt
+          ? `সর্বশেষ ব্যাখ্যা করা হচ্ছিল: "${excerpt}" — ঠিক এখান থেকেই পরবর্তী ধারণা, তথ্য ও পয়েন্ট অনর্গল বাংলায় একটানা বুঝিয়ে যান।`
+          : `কোনো ভূমিকা না নিয়ে সরাসরি সরকারি চাকরির পরীক্ষার উপযোগী "${topic}" বিষয়ের পরবর্তী গভীর ও বিশদ তথ্য অনর্গল বাংলায় বুঝিয়ে যান।`;
+        return `[সেশন রিকানেকশন — কম্পিটিটিভ পরীক্ষা পাঠদান অব্যাহত রাখুন]: আমাদের সরকারি চাকরির প্রস্তুতি (${subjName}) বিষয়ে "${topic}" টপিকের আলোচনা চলছিল। কোনো প্রাথমিক সম্ভাষণ (যেমন "নমস্কার", "হ্যালো", বা "শুনতে পাচ্ছ") একেবারেই বলবেন না। ${continuationHint}`;
+      } else if (mode === 'quiz') {
+        const pendingQ = ctx.pendingQuestion;
+        return pendingQ
+          ? `[সেশন রিকানেকশন — কম্পিটিটিভ মক কুইজ অব্যাহত]: আমাদের সরকারি চাকরির পরীক্ষা (${subjName}) বিষয়ে "${topic}" টপিকের মক কুইজ চলছিল। শিক্ষক প্রশ্ন করেছিলেন: "${pendingQ}"। কোনো ভূমিকা ছাড়া ছাত্রকে স্বাভাবিক কণ্ঠে উত্তর দিতে বলুন।`
+          : `[সেশন রিকানেকশন — পরবর্তী কম্পিটিটিভ প্রশ্ন]: আমাদের সরকারি চাকরির পরীক্ষা (${subjName}) বিষয়ে "${topic}" টপিকের মক কুইজ চলছিল। কোনো সম্ভাষণ ছাড়া সরাসরি পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ MCQs/ধারণাগত প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।`;
+      } else {
+        return `[সেশন রিকানেকশন — কম্পিটিটিভ ডাউট সেশন অব্যাহত]: আমাদের সরকারি চাকরির প্রস্তুতি (${subjName}) বিষয়ে "${topic}" টপিকের আলোচনা চলছিল। কোনো প্রাথমিক ভূমিকা ছাড়া স্বাভাবিকভাবে বলুন যে আপনি প্রস্তুত এবং ছাত্রকে "${topic}" নিয়ে প্রশ্ন করতে বলুন।`;
+      }
+    }
+
+    // 3. WBBSE School Classes (Class 5 - Class 10)
     const classLabel = ctx.classGrade ? ` (${ctx.classGrade})` : '';
     const subjName = ctx.subject || '';
 

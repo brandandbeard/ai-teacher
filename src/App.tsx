@@ -306,8 +306,24 @@ export default function App() {
 
     const targetSection = overrides?.section ?? activeSection;
     const targetMode = overrides?.mode ?? teachingMode;
-    const targetPrompt = overrides?.personaPrompt ?? (targetSection === 'notebook' ? GOOGLE_NOTEBOOKLM_PROMPT : systemInstruction);
-    const targetVoice = overrides?.voice ?? (targetSection === 'notebook' ? 'Kore' : voice);
+    const compMatch = COMPETITIVE_SUBJECTS.find((s) => s.title === selectedCompetitiveSubject) || COMPETITIVE_SUBJECTS[0];
+    const defaultCompetitivePrompt = compMatch.prompt;
+    const defaultCompetitiveVoice = compMatch.voice;
+
+    const targetPrompt = overrides?.personaPrompt ?? (
+      targetSection === 'notebook'
+        ? GOOGLE_NOTEBOOKLM_PROMPT
+        : targetSection === 'competitive'
+        ? defaultCompetitivePrompt
+        : systemInstruction
+    );
+    const targetVoice = overrides?.voice ?? (
+      targetSection === 'notebook'
+        ? 'Kore'
+        : targetSection === 'competitive'
+        ? defaultCompetitiveVoice
+        : voice
+    );
     const targetSources = overrides?.notebookSources ?? notebookSources;
 
     // CRITICAL: When user initiates a fresh call, discard old session resume token so the selected subject/persona starts clean!
@@ -315,6 +331,7 @@ export default function App() {
       hasKickoffSentRef.current = false;
       lastResumptionHandleRef.current = null;
       conversationStateMachine.setResumptionHandle(null);
+      conversationStateMachine.clearTopic();
 
       const customTopicTrimmed = (overrides?.topic ?? customStartingTopic).trim();
 
@@ -519,11 +536,21 @@ export default function App() {
                 const currentCtx = conversationStateMachine.getContext();
                 const topicToTeach = currentCtx.currentTopic || customStartingTopic.trim();
                 if (topicToTeach && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                  const kickoffText = teachingMode === 'quiz'
-                    ? `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ের প্রথম গুরুত্বপূর্ণ প্রশ্নটি করুন।`
-                    : teachingMode === 'doubts'
-                    ? `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ে আমার কী কী সাধারণ সংশয় হতে পারে সংক্ষেপে বলুন।`
-                    : `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ের মূল ধারণা দিয়ে বিস্তারিত বাংলায় আলোচনা শুরু করুন।`;
+                  const isSpokenEnglish = currentCtx.personaId === 'spoken-english' || currentCtx.personaId === 'shreya-maam' || currentCtx.subject === 'Spoken English';
+                  let kickoffText: string;
+                  if (isSpokenEnglish) {
+                    kickoffText = teachingMode === 'quiz'
+                      ? `[START CLASS]: Let's start our Spoken English session on "${topicToTeach}". Ask me the first oral question or speaking drill in English.`
+                      : teachingMode === 'doubts'
+                      ? `[START CLASS]: Let's start our Spoken English session on "${topicToTeach}". Tell me what common conversational mistakes I should avoid and invite my questions.`
+                      : `[START CLASS]: Let's begin our Spoken English practice on "${topicToTeach}". Start speaking and explaining in natural English right away.`;
+                  } else {
+                    kickoffText = teachingMode === 'quiz'
+                      ? `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ের প্রথম গুরুত্বপূর্ণ প্রশ্নটি করুন।`
+                      : teachingMode === 'doubts'
+                      ? `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ে আমার কী কী সাধারণ সংশয় হতে পারে সংক্ষেপে বলুন।`
+                      : `[ক্লাস শুরু]: আমরা "${topicToTeach}" বিষয়ের ওপর পড়াশোনা শুরু করব। এই বিষয়ের মূল ধারণা দিয়ে বিস্তারিত বাংলায় আলোচনা শুরু করুন।`;
+                  }
                   
                   wsRef.current.send(JSON.stringify({ type: 'text', text: kickoffText }));
                 }
@@ -1028,9 +1055,10 @@ export default function App() {
     setSelectedClass(cls);
     setActiveSection('wbbse');
     const subjectName = selectedWbbseSubject === 'science' ? 'বিজ্ঞান' : selectedWbbseSubject === 'history' ? 'ইতিহাস' : 'ভূগোল';
-    // Clear old session resume handle so previous subject never bleeds in
+    // Clear old session resume handle and topic so previous subject/class never bleeds in
     lastResumptionHandleRef.current = null;
     conversationStateMachine.setResumptionHandle(null);
+    conversationStateMachine.clearTopic();
     conversationStateMachine.setTeachingMode(teachingMode, cls, subjectName);
     if (callStatus !== 'idle') {
       const initialTopic = conversationStateMachine.pickRandomTopic(subjectName, cls);
@@ -1046,9 +1074,10 @@ export default function App() {
     const defaultVoice = subj === 'science' ? 'Kore' : 'Charon';
     const subjectName = subj === 'science' ? 'বিজ্ঞান' : subj === 'history' ? 'ইতিহাস' : 'ভূগোল';
 
-    // Clear old session resume handle so previous subject never bleeds in
+    // Clear old session resume handle and topic so previous subject never bleeds in
     lastResumptionHandleRef.current = null;
     conversationStateMachine.setResumptionHandle(null);
+    conversationStateMachine.clearTopic();
     setVoice(defaultVoice);
     setSystemInstruction(prompt);
     conversationStateMachine.updatePersona(prompt);
@@ -1064,9 +1093,10 @@ export default function App() {
     setSelectedCompetitiveSubject(compSubj.title);
     setActiveSection('competitive');
 
-    // Clear old session resume handle so previous subject never bleeds in
+    // Clear old session resume handle and topic so previous subject never bleeds in
     lastResumptionHandleRef.current = null;
     conversationStateMachine.setResumptionHandle(null);
+    conversationStateMachine.clearTopic();
     setVoice(compSubj.voice);
     setSystemInstruction(compSubj.prompt);
     conversationStateMachine.updatePersona(compSubj.prompt);

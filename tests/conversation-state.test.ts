@@ -682,5 +682,88 @@ test('Scenario AH: Reconnection prompt in quiz mode preserves pending question',
   assert.ok(reconnPrompt.includes('কুইজের উত্তর গ্রহণ'));
 });
 
+test('Scenario AI: Reconnection prompt for Spoken English strictly produces English instruction without Bengali words', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(SHREYA_MAAM_PROMPT);
+  sm.setTeachingMode('lecture', undefined, 'Spoken English');
+  sm.setTopic('Daily Routine & Conversational Fluency');
 
+  sm.processModelOutput('When describing your morning routine, use present simple verbs like wake up, brush, and prepare breakfast.');
 
+  assert.equal(sm.getContext().personaId, 'shreya-maam');
+  assert.equal(sm.getContext().subject, 'Spoken English');
+  assert.equal(sm.getContext().classGrade, undefined);
+
+  const reconnPrompt = sm.generateReconnectionPrompt();
+  assert.ok(reconnPrompt.includes('SESSION RECONNECTION — SEAMLESS ENGLISH PRACTICE'));
+  assert.ok(reconnPrompt.includes('Daily Routine & Conversational Fluency'));
+  assert.ok(reconnPrompt.includes('wake up, brush, and prepare breakfast'));
+  // Ensure NO Bengali instruction or greeting was generated for English persona
+  assert.doesNotMatch(reconnPrompt, /অনর্গল বাংলায়/);
+  assert.doesNotMatch(reconnPrompt, /কোনো প্রাথমিক সম্ভাষণ/);
+});
+
+test('Scenario AJ: Reconnection prompt for Competitive Exams maintains topic and competitive exam context without school class tags', () => {
+  const sm = new ConversationStateMachine();
+  sm.switchPersona('history-sir', 'Indian History', 'Indian History');
+  sm.setTeachingMode('lecture', undefined, 'Indian History');
+  sm.setTopic('সিন্ধু সভ্যতা ও হরপ্পা সংস্কৃতি (Indus Valley Civilization)');
+
+  sm.processModelOutput('হরপ্পা মহেঞ্জোদাড়োর বৃহৎ স্নানাগার ও শস্যাগারের স্থাপত্য প্রমাণ করে তাদের উন্নত পৌর শাসনব্যবস্থা।');
+
+  assert.equal(sm.getContext().classGrade, undefined);
+  assert.equal(sm.getContext().subject, 'Indian History');
+
+  const reconnPrompt = sm.generateReconnectionPrompt();
+  assert.ok(reconnPrompt.includes('কম্পিটিটিভ পরীক্ষা পাঠদান অব্যাহত রাখুন'));
+  assert.ok(reconnPrompt.includes('সিন্ধু সভ্যতা ও হরপ্পা সংস্কৃতি'));
+  assert.ok(reconnPrompt.includes('বৃহৎ স্নানাগার'));
+  assert.doesNotMatch(reconnPrompt, /Class 10/);
+  assert.doesNotMatch(reconnPrompt, /Class 8/);
+});
+
+test('Scenario AK: Session isolation between classes (Class 6 Science -> disconnect -> Class 10 Science) leaves no trace of Class 6', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  sm.setTeachingMode('lecture', 'Class 6', 'বিজ্ঞান');
+  sm.setTopic('মৌলিক, যৌগিক ও মিশ্র পদার্থ');
+  sm.processStudentInput('মিশ্র পদার্থ আর যৌগিক পদার্থের পার্থক্য কী?');
+  sm.processModelOutput('মিশ্র পদার্থে উপাদানগুলি নিজেদের ধর্ম বজায় রাখে...');
+
+  assert.equal(sm.getContext().classGrade, 'Class 6');
+  assert.equal(sm.getContext().currentTopic, 'মৌলিক, যৌগিক ও মিশ্র পদার্থ');
+  assert.equal(sm.getContext().recentDialogueHistory?.length, 2);
+
+  // User ends call (stopCall triggers clearTopic)
+  sm.clearTopic();
+  assert.equal(sm.getContext().currentTopic, null);
+  assert.equal(sm.getContext().classGrade, undefined);
+  assert.equal(sm.getContext().recentDialogueHistory?.length, 0);
+
+  // User starts new session in Class 10
+  sm.setTeachingMode('lecture', 'Class 10', 'বিজ্ঞান');
+  sm.setTopic('গ্যাসের আচরণ');
+  assert.equal(sm.getContext().classGrade, 'Class 10');
+  assert.equal(sm.getContext().currentTopic, 'গ্যাসের আচরণ');
+
+  const durable = sm.generateDurableContextInstruction();
+  assert.match(durable, /Class: Class 10/);
+  assert.match(durable, /Active Topic to teach: গ্যাসের আচরণ/);
+  assert.doesNotMatch(durable, /Class 6/);
+  assert.doesNotMatch(durable, /মিশ্র পদার্থ/);
+});
+
+test('Scenario AL: Dialogue history persistence in durable context instruction', () => {
+  const sm = new ConversationStateMachine();
+  sm.updatePersona(WBBSE_SCIENCE_PROMPT);
+  sm.setTeachingMode('lecture', 'Class 10', 'বিজ্ঞান');
+  sm.setTopic('আলোর প্রতিফলন');
+
+  sm.processStudentInput('দর্পণে প্রতিবিম্ব কীভাবে তৈরি হয়?');
+  sm.processModelOutput('নিয়মিত প্রতিফলনের ফলে গোলীয় বা সমতল দর্পণে প্রতিবিম্ব গঠিত হয়।');
+
+  const durable = sm.generateDurableContextInstruction();
+  assert.match(durable, /RECENT DIALOGUE TURNS/);
+  assert.match(durable, /Student: "দর্পণে প্রতিবিম্ব কীভাবে তৈরি হয়\?"/);
+  assert.match(durable, /Teacher: "নিয়মিত প্রতিফলনের ফলে গোলীয় বা সমতল দর্পণে প্রতিবিম্ব গঠিত হয়/);
+});
