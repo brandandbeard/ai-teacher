@@ -35,6 +35,7 @@ export interface TeachingContextSummary {
   lastStudentInput?: string;    // Last recognized student transcript/message
   lastModelOutput?: string;     // Last spoken/explained output from the model
   recentDialogueHistory?: Array<{ role: 'user' | 'model'; text: string }>; // Last dialogue turns for session continuity
+  askedQuestions?: string[];    // All questions already asked in this session to prevent repetition
   conversationState: ConversationState;
   turnCount: number;
   turnsCompleted: number;       // Alias for turnCount

@@ -9,6 +9,105 @@ export interface StudentIntentResult {
 }
 
 /**
+ * Normalizes question strings by removing leading teacher conversational preambles
+ */
+export function normalizeQuestion(q: string): string {
+  if (!q) return '';
+  return q
+    .replace(/^(দাঁড়াও!?|দাঁড়াও!?|মন দিয়ে শুনছ তো\??|চমৎকার!?|বেশ!?|খুব ভালো!?|চলো!?|এবার!?|পরের প্রশ্ন:?|প্রথম প্রশ্ন:?|Well!?|Okay!?|Now,?|Right,?)\s*/gi, '')
+    .replace(/^(দাঁড়াও! মন দিয়ে শুনছ তো\??\s*এইমাত্র যেটুকু বোঝালাম সেখান থেকে একটা চটপট উত্তর দাও তো দেখি\s*[-—:]?\s*)/i, '')
+    .replace(/^(দাঁড়াও! মন দিয়ে শুনছ তো\??\s*এইমাত্র যেটুকু বোঝালাম সেখান থেকে একটা চটপট উত্তর দাও তো দেখি\s*[-—:]?\s*)/i, '')
+    .replace(/^(চটপট উত্তর দাও তো দেখি\s*[-—:]?\s*)/i, '')
+    .replace(/^(একটি প্রশ্নের উত্তর দাও\s*[-—:]?\s*)/i, '')
+    .replace(/^(বলো তো দেখি\s*[-—:]?\s*)/i, '')
+    .replace(/^(উত্তর দাও তো দেখি\s*[-—:]?\s*)/i, '')
+    .replace(/^(Please tell me\s*[-—:]?\s*)/i, '')
+    .replace(/^(Can you tell me\s*[-—:]?\s*)/i, '')
+    .trim();
+}
+
+/**
+ * Extracts individual clean question sentences from model or transcript speech
+ */
+export function extractQuestionSentences(text: string): string[] {
+  if (!text || typeof text !== 'string') return [];
+
+  const questions: string[] = [];
+  const tokens = text.split(/([?।!\n]+)/).filter(Boolean);
+
+  let current = '';
+  for (let i = 0; i < tokens.length; i++) {
+    const part = tokens[i];
+    current += part;
+    if (/[?।!\n]/.test(part) || i === tokens.length - 1) {
+      const sentence = current.trim();
+      current = '';
+      if (!sentence || sentence.length < 5) continue;
+
+      const hasQuestionMark = sentence.includes('?');
+      const lower = sentence.toLowerCase();
+
+      const hasBengaliQuestionTrigger =
+        sentence.includes('বলো তো') ||
+        sentence.includes('বলতে পারবে') ||
+        sentence.includes('উত্তর দাও') ||
+        sentence.includes('জানাও তো') ||
+        sentence.includes('কী হবে') ||
+        sentence.includes('কাকে বলে') ||
+        sentence.includes('পার্থক্য কী') ||
+        sentence.includes('একক কী') ||
+        sentence.includes('নাম কী') ||
+        sentence.includes('কোনটি') ||
+        sentence.includes('কোথায়') ||
+        sentence.includes('কখন') ||
+        sentence.includes('কী কারণে') ||
+        sentence.includes('কার আবিষ্কার') ||
+        sentence.includes('কে আবিষ্কার') ||
+        sentence.includes('কে ছিলেন') ||
+        sentence.includes('কেন ') ||
+        sentence.includes('কত ');
+
+      const hasEnglishQuestionTrigger =
+        lower.startsWith('what ') ||
+        lower.startsWith('what\'s ') ||
+        lower.startsWith('why ') ||
+        lower.startsWith('how ') ||
+        lower.startsWith('when ') ||
+        lower.startsWith('where ') ||
+        lower.startsWith('which ') ||
+        lower.startsWith('who ') ||
+        lower.startsWith('can you ') ||
+        lower.startsWith('could you ') ||
+        lower.startsWith('tell me ') ||
+        lower.startsWith('do you ') ||
+        lower.startsWith('have you ') ||
+        lower.startsWith('would you ') ||
+        lower.startsWith('is it ') ||
+        lower.startsWith('are there ');
+
+      if (hasQuestionMark || hasBengaliQuestionTrigger || hasEnglishQuestionTrigger) {
+        const clean = normalizeQuestion(sentence);
+        if (clean.length >= 6 && !questions.includes(clean)) {
+          questions.push(clean);
+        }
+      }
+    }
+  }
+
+  // Fallback: If text contains '?' but tokenizer didn't catch separate sentence
+  if (questions.length === 0 && text.includes('?')) {
+    const qIndex = text.lastIndexOf('?');
+    const start = Math.max(0, text.lastIndexOf('।', qIndex), text.lastIndexOf('.', qIndex), text.lastIndexOf('\n', qIndex));
+    const fallbackQ = normalizeQuestion(text.slice(start, qIndex + 1).replace(/^[।.\n\s]+/, ''));
+    if (fallbackQ.length >= 6) {
+      questions.push(fallbackQ);
+    }
+  }
+
+  return questions;
+}
+
+/**
  * Conversation State Machine & Durable Context Manager
  * Enforces continuity across turns, interruptions, topic switches, and transport reconnects.
  */
@@ -56,6 +155,7 @@ export class ConversationStateMachine {
       notebookSources: [...this.notebookSources],
       activeSourcesCount: activeSources.length,
       recentDialogueHistory: [...this.recentDialogueHistory],
+      askedQuestions: [...this.askedQuestions],
     };
   }
 
@@ -131,9 +231,18 @@ export class ConversationStateMachine {
 
   public recordAskedQuestion(question: string) {
     if (!question || typeof question !== 'string') return;
-    const trimmed = question.trim();
-    if (trimmed && !this.askedQuestions.includes(trimmed)) {
-      this.askedQuestions.push(trimmed);
+    const clean = normalizeQuestion(question.trim());
+    if (!clean || clean.length < 6) return;
+
+    const exists = this.askedQuestions.some((q) => {
+      if (q === clean) return true;
+      if (q.length > 15 && clean.length > 15 && (q.includes(clean) || clean.includes(q))) return true;
+      return false;
+    });
+
+    if (!exists) {
+      this.askedQuestions.push(clean);
+      this.notify();
     }
   }
 
@@ -634,26 +743,32 @@ export class ConversationStateMachine {
       }
     }
 
-    // Detect if teacher asked a pop-quiz / attention check question
-    const isAskingQuestion =
-      text.includes('দাঁড়াও! মন দিয়ে শুনছ তো') ||
-      text.includes('চটপট উত্তর দাও') ||
-      text.includes('একটি প্রশ্নের উত্তর দাও') ||
-      text.includes('উত্তর দাও তো দেখি') ||
-      text.includes('বলো তো') ||
-      (text.includes('?') && (text.includes('কী') || text.includes('কেন') || text.includes('কত') || text.includes('কোন')));
-
-    if (isAskingQuestion) {
-      const qText = text.slice(-200).trim();
-      this.context.pendingQuestion = qText;
+    // Extract teacher questions from output
+    const extractedQuestions = extractQuestionSentences(text);
+    if (extractedQuestions.length > 0) {
+      const latestQ = extractedQuestions[extractedQuestions.length - 1];
+      this.context.pendingQuestion = latestQ;
       this.context.popQuizPending = true;
-      if (!this.askedQuestions.includes(qText)) {
-        this.askedQuestions.push(qText);
+      for (const q of extractedQuestions) {
+        this.recordAskedQuestion(q);
       }
       this.transitionTo('WAITING_FOR_STUDENT', 'Teacher asked checkpoint question');
-    } else {
-      this.transitionTo('TEACHING', 'Teacher is actively explaining');
+      return;
     }
+
+    // In Quiz mode, treat substantial teacher prompt as question
+    if (this.context.teachingMode === 'quiz' && text.trim().length > 15) {
+      const candidate = normalizeQuestion(text.slice(-200).trim());
+      if (candidate.length >= 8) {
+        this.context.pendingQuestion = candidate;
+        this.context.popQuizPending = true;
+        this.recordAskedQuestion(candidate);
+        this.transitionTo('WAITING_FOR_STUDENT', 'Teacher asked oral quiz question');
+        return;
+      }
+    }
+
+    this.transitionTo('TEACHING', 'Teacher is actively explaining');
   }
 
   /**
@@ -991,6 +1106,14 @@ export class ConversationStateMachine {
       'Static GK'
     ].includes(ctx.subject || '');
 
+    const asked = this.getAskedQuestions();
+    const antiRepeatClauseBengali = asked.length > 0
+      ? ` ইতিপূর্বে যে যে প্রশ্ন জিজ্ঞাসা করা হয়েছে (এগুলো পুনরায় করা কঠোরভাবে নিষিদ্ধ): [${asked.slice(-10).map((q, i) => `${i + 1}. "${q}"`).join('; ')}] — এদের বাদ দিয়ে সম্পূর্ণ নতুন ভিন্ন প্রশ্ন করুন।`
+      : '';
+    const antiRepeatClauseEnglish = asked.length > 0
+      ? ` Previously asked drills (STRICTLY DO NOT REPEAT): [${asked.slice(-10).map((q, i) => `${i + 1}. "${q}"`).join('; ')}] — Ask a completely fresh English drill strictly different from these.`
+      : '';
+
     if (isNotebook) {
       if (mode === 'lecture') {
         return `[সেশন রিকানেকশন — নিরবচ্ছিন্ন নোটবুক আলোচনা চালিয়ে যান]: আমরা নোটবুক সোর্স "${topic}" নিয়ে আলোচনা করছিলাম। কোনো প্রাথমিক সম্ভাষণ বা শুভেচ্ছা ("নমস্কার", "হ্যালো" ইত্যাদি) একেবারেই না বলে, যেখানে আলোচনা থেমেছিল সেখান থেকেই পরবর্তী গুরুত্বপূর্ণ পয়েন্ট ও তত্ত্ব অনর্গল বাংলায় একটানা বুঝিয়ে যান।`;
@@ -1000,7 +1123,7 @@ export class ConversationStateMachine {
         const pendingQ = ctx.pendingQuestion;
         return pendingQ
           ? `[সেশন রিকানেকশন — নোটবুক কুইজের উত্তর গ্রহণ]: আমরা "${topic}" থেকে মৌখিক প্রশ্ন করেছিলাম: "${pendingQ}"। কোনো ভূমিকা ছাড়া স্বাভাবিক কণ্ঠে ছাত্রকে প্রশ্নটির উত্তর দিতে বলুন।`
-          : `[সেশন রিকানেকশন — পরবর্তী নোটবুক কুইজ প্রশ্ন]: আমরা "${topic}" থেকে মৌখিক কুইজ নিচ্ছিলাম। কোনো সম্ভাষণ ছাড়া সরাসরি পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।`;
+          : `[সেশন রিকানেকশন — পরবর্তী নোটবুক কুইজ প্রশ্ন]: আমরা "${topic}" থেকে মৌখিক কুইজ নিচ্ছিলাম। কোনো সম্ভাষণ ছাড়া সরাসরি পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।${antiRepeatClauseBengali}`;
       }
     }
 
@@ -1016,7 +1139,7 @@ export class ConversationStateMachine {
         const pendingQ = ctx.pendingQuestion;
         return pendingQ
           ? `[SESSION RECONNECTION — ORAL QUIZ ANSWER]: We were doing an oral English speaking drill on "${topic}". You asked the student: "${pendingQ}". Without any greeting, naturally encourage the student to answer now.`
-          : `[SESSION RECONNECTION — NEXT ENGLISH DRILL]: We were practicing oral English drills on "${topic}". Without any greeting, immediately ask the student the next practical spoken English speaking challenge or question.`;
+          : `[SESSION RECONNECTION — NEXT ENGLISH DRILL]: We were practicing oral English drills on "${topic}". Without any greeting, immediately ask the student the next practical spoken English speaking challenge or question.${antiRepeatClauseEnglish}`;
       } else {
         return `[SESSION RECONNECTION — DOUBT CLEARING]: We were having a doubt-clearing session on Spoken English topic "${topic}". Without any greeting, tell the student you are ready for their questions or sentences in natural English.`;
       }
@@ -1035,7 +1158,7 @@ export class ConversationStateMachine {
         const pendingQ = ctx.pendingQuestion;
         return pendingQ
           ? `[সেশন রিকানেকশন — কম্পিটিটিভ মক কুইজ অব্যাহত]: আমাদের সরকারি চাকরির পরীক্ষা (${subjName}) বিষয়ে "${topic}" টপিকের মক কুইজ চলছিল। শিক্ষক প্রশ্ন করেছিলেন: "${pendingQ}"। কোনো ভূমিকা ছাড়া ছাত্রকে স্বাভাবিক কণ্ঠে উত্তর দিতে বলুন।`
-          : `[সেশন রিকানেকশন — পরবর্তী কম্পিটিটিভ প্রশ্ন]: আমাদের সরকারি চাকরির পরীক্ষা (${subjName}) বিষয়ে "${topic}" টপিকের মক কুইজ চলছিল। কোনো সম্ভাষণ ছাড়া সরাসরি পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ MCQs/ধারণাগত প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।`;
+          : `[সেশন রিকানেকশন — পরবর্তী কম্পিটিটিভ প্রশ্ন]: আমাদের সরকারি চাকরির পরীক্ষা (${subjName}) বিষয়ে "${topic}" টপিকের মক কুইজ চলছিল। কোনো সম্ভাষণ ছাড়া সরাসরি পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ MCQs/ধারণাগত প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।${antiRepeatClauseBengali}`;
       } else {
         return `[সেশন রিকানেকশন — কম্পিটিটিভ ডাউট সেশন অব্যাহত]: আমাদের সরকারি চাকরির প্রস্তুতি (${subjName}) বিষয়ে "${topic}" টপিকের আলোচনা চলছিল। কোনো প্রাথমিক ভূমিকা ছাড়া স্বাভাবিকভাবে বলুন যে আপনি প্রস্তুত এবং ছাত্রকে "${topic}" নিয়ে প্রশ্ন করতে বলুন।`;
       }
@@ -1055,7 +1178,7 @@ export class ConversationStateMachine {
       const pendingQ = ctx.pendingQuestion;
       return pendingQ
         ? `[সেশন রিকানেকশন — কুইজের উত্তর গ্রহণ]: আমাদের ${subjName}${classLabel} বিষয়ের "${topic}" অধ্যায়ের মৌখিক কুইজ চলছিল। শিক্ষক প্রশ্ন করেছিলেন: "${pendingQ}"। কোনো অপ্রয়োজনীয় ভূমিকা বা সম্ভাষণ ছাড়া স্বাভাবিক কণ্ঠে ছাত্রকে বলুন প্রশ্নটির উত্তর দিতে।`
-        : `[সেশন রিকানেকশন — পরবর্তী কুইজ প্রশ্ন]: আমাদের ${subjName}${classLabel} বিষয়ের "${topic}" অধ্যায়ের মৌখিক কুইজ চলছিল। কোনো সম্ভাষণ ছাড়া সরাসরি এই অধ্যায়ের পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।`;
+        : `[সেশন রিকানেকশন — পরবর্তী কুইজ প্রশ্ন]: আমাদের ${subjName}${classLabel} বিষয়ের "${topic}" অধ্যায়ের মৌখিক কুইজ চলছিল। কোনো সম্ভাষণ ছাড়া সরাসরি এই অধ্যায়ের পরবর্তী সম্পূর্ণ নতুন ও গুরুত্বপূর্ণ প্রশ্নটি ছাত্রকে জিজ্ঞাসা করুন।${antiRepeatClauseBengali}`;
     } else {
       return `[সেশন রিকানেকশন — ডাউট সেশন অব্যাহত]: আমাদের ${subjName}${classLabel} বিষয়ের "${topic}" অধ্যায়ের ডাউট সেশন চলছিল। কোনো প্রাথমিক ভূমিকা বা সম্ভাষণ ছাড়া সংক্ষেপে স্বাভাবিকভাবে বলুন যে আপনি প্রস্তুত এবং ছাত্রকে "${topic}" নিয়ে প্রশ্ন করতে বলুন।`;
     }

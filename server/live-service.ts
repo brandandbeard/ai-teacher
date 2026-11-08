@@ -961,7 +961,14 @@ Return STRICT valid JSON only with NO markdown fences matching this schema:
                 .join(' | ');
               metaParts.push(`RecentTurns="${histSummary}"`);
             }
-            sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: ${metaParts.join(', ')}. Strictly teach ONLY this active subject, class, mode, and topic. DO NOT mix any other subject or say any initial greeting. Immediately resume continuous teaching of this topic.]`;
+            if (contextSummary.askedQuestions && Array.isArray(contextSummary.askedQuestions) && contextSummary.askedQuestions.length > 0) {
+              const qList = contextSummary.askedQuestions
+                .slice(-15)
+                .map((q: string, i: number) => `(${i + 1}) "${q}"`)
+                .join('; ');
+              metaParts.push(`ALREADY_ASKED_QUESTIONS_LOCKED_DO_NOT_REPEAT=[${qList}]`);
+            }
+            sysInstruction += `\n\n[DURABLE ONGOING LESSON CONTEXT: ${metaParts.join(', ')}. Strictly teach ONLY this active subject, class, mode, and topic. ABSOLUTE ANTI-REPETITION MANDATE: Under NO circumstances may you repeat or re-ask ANY question from the chat history or listed in ALREADY_ASKED_QUESTIONS_LOCKED_DO_NOT_REPEAT. Formulate completely fresh, brand-new questions testing different concepts. DO NOT mix any other subject or say any initial greeting. Immediately resume continuous teaching of this topic.]`;
           }
 
           // Strict Bilingual Directive: Guarantee student speech is recognized exclusively as Bengali or English
@@ -970,11 +977,11 @@ Return STRICT valid JSON only with NO markdown fences matching this schema:
 - The student speaks EXCLUSIVELY in Bengali (বাংলা), English, or mixed Bengali-English ('Benglish' / বাংলা-ইংরেজি মিশ্রণ / code-switching).
 - The student NEVER speaks German, Hindi (Devanagari), French, Korean, Japanese, Chinese, Russian, Spanish, Arabic, or any other foreign language!
 - CRITICAL AUDIO HALLUCINATION & PHONETIC RECOGNITION RULES:
-  1. If background room noise, mic hiss, breathing, or Indian/Bengali accent is captured, NEVER transcribe, interpret, or guess words in German (e.g. 'Blihartzahnarzt', 'Zahnarzt', 'Ja da haben Sie'), Hindi Devanagari (e.g. 'ब्रह्मास्त्र'), French ('oui', 'merci'), or Korean!
+  1. If background room noise, mic hiss, breathing, or Indian/Bengali accent is captured, NEVER transcribe, interpret, or guess words in German (e.g. 'Blihartzahnarzt', 'Zahnarzt', 'Ja da haben Sie'), Hindi Devanagari (e.g. 'ব্রह्मास्त्र'), French ('oui', 'merci'), or Korean!
   2. ALWAYS map acoustic speech to the active educational subject terms in Bengali or English.
      Example in Indian History (সিন্ধু সভ্যতা): if student says 'লোথাল' (Lothal), NEVER mishear it as 'notar' or foreign gibberish. Recognize it as 'লোথাল' (Lothal). Match student answers against expected chapter concepts (e.g. রাখালদাস বন্দ্যোপাধ্যায়, দয়ারাম সাহানী, মহেঞ্জোদাড়ো, হরপ্পা, লোথাল, কালিবঙ্গান, বৃহৎ স্নানাগার, ব্রোঞ্জ, তামা, সিন্ধু নদ).
   3. Be forgiving of acoustic microphone imperfections — if the student's Bengali or English response is phonetically close to the correct concept, validate their answer immediately and proceed smoothly!
-  4. NEVER repeat a question that was already asked earlier in the session. Always move forward to a new question or concept in the chapter.
+  4. ABSOLUTE ANTI-REPETITION MANDATE: NEVER repeat or re-ask ANY question that has already been asked earlier in this conversation or appears in the chat history, even in different words. Every oral question, pop quiz, or test drill MUST be completely fresh and test a different concept or fact!
   5. All your explanations, teaching, feedback, and transcriptions MUST strictly be in Bengali (বাংলা) and/or English.]`;
           }
 

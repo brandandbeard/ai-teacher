@@ -33,7 +33,7 @@ import { AudioOrb } from './components/AudioOrb.tsx';
 import { VoiceSelector, VOICES } from './components/VoiceSelector.tsx';
 import { TranscriptView, TranscriptItem } from './components/TranscriptView.tsx';
 import { getSavedBackendHost, cleanBackendHost, getWsUrl } from './utils/backendConfig.ts';
-import { conversationStateMachine } from './utils/conversationStateMachine.ts';
+import { conversationStateMachine, extractQuestionSentences } from './utils/conversationStateMachine.ts';
 import type { TeachingContextSummary, ConversationState, TeachingMode } from './types/conversation.ts';
 import {
   NON_STOP_TEACHING_SYSTEM_RULE,
@@ -651,6 +651,22 @@ export default function App() {
               setStatusMessage('পাঠদান চলছে (কথা বলুন, চ্যাটে লিখুন বা Next চাপুন)...');
             }
             armInactivityTimer(300000); // 5-minute inactivity safeguard
+
+            // Enforce chat history anti-repetition: scan transcripts for any teacher questions asked
+            setTranscripts((prev) => {
+              const geminiMsgs = prev.filter((t) => t.sender === 'gemini');
+              if (geminiMsgs.length > 0) {
+                const latest = geminiMsgs[geminiMsgs.length - 1];
+                if (latest?.text) {
+                  const qs = extractQuestionSentences(latest.text);
+                  for (const q of qs) {
+                    conversationStateMachine.recordAskedQuestion(q);
+                  }
+                }
+              }
+              return prev;
+            });
+            setActiveContext({ ...conversationStateMachine.getContext() });
           }
 
           if (msg.type === 'error') {
@@ -1185,7 +1201,19 @@ export default function App() {
     }
 
     if (teachingMode === 'quiz') {
-      sendQuickActionMessage('পরের প্রশ্নটি জিজ্ঞাসা করো। পূর্বের প্রশ্নগুলো পুনরাবৃত্তি না করে এই অধ্যায়ের সম্পূর্ণ নতুন একটি প্রশ্ন করো।');
+      const asked = conversationStateMachine.getAskedQuestions();
+      const isEnglish = activeContext.personaId === 'spoken-english' || activeContext.personaId === 'shreya-maam' || activeContext.subject === 'Spoken English';
+      if (isEnglish) {
+        const askedNotice = asked.length > 0
+          ? ` (Previously asked questions in chat history: ${asked.slice(-6).map((q) => `"${q}"`).join(', ')} — STRICTLY DO NOT REPEAT ANY OF THESE)`
+          : '';
+        sendQuickActionMessage(`Ask the next question. Do not repeat any previous questions, ask a completely fresh spoken English drill.${askedNotice}`);
+      } else {
+        const askedNotice = asked.length > 0
+          ? ` (ইতিপূর্বে করা প্রশ্নসমূহ: ${asked.slice(-6).map((q) => `"${q}"`).join(', ')} — এগুলোর কোনোটিই পুনরাবৃত্তি করবে না)`
+          : '';
+        sendQuickActionMessage(`পরের প্রশ্নটি জিজ্ঞাসা করো। পূর্বের কোনো প্রশ্ন পুনরাবৃত্তি না করে এই অধ্যায়ের সম্পূর্ণ নতুন একটি প্রশ্ন করো।${askedNotice}`);
+      }
     } else if (teachingMode === 'doubts') {
       sendQuickActionMessage('পরবর্তী বিষয়ে চলে যাও বা পরের ধারণাটি বুঝিয়ে বলো');
     } else {
